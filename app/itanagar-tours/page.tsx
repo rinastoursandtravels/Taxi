@@ -221,9 +221,6 @@ export default function ItanagarToursPage() {
                 <Link href="/tours" className="group flex items-center justify-center gap-2.5 px-6 py-3 bg-primary-950 text-white font-black rounded-2xl hover:bg-primary-900 transition-all shadow-2xl shadow-primary-950/25">
                   View Tour Packages <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
                 </Link>
-                <Link href="/hourly-taxi-itanagar" className="flex items-center justify-center gap-2.5 px-6 py-3 border-2 border-primary-950/20 text-primary-950 font-bold rounded-2xl hover:bg-primary-950/[0.07] transition-all">
-                  Hourly Taxi Rental
-                </Link>
               </div>
             </div>
           </section>
@@ -236,7 +233,6 @@ export default function ItanagarToursPage() {
                 {[
                   { href: '/arunachal-tours', label: 'Arunachal Pradesh Tours' },
                   { href: '/hollongi-airport-taxi', label: 'Hollongi Airport Taxi' },
-                  { href: '/hourly-taxi-itanagar', label: 'Hourly Taxi Itanagar' },
                   { href: '/faq', label: 'FAQ' },
                 ].map(({ href, label }) => (
                   <Link key={href} href={href} className="px-4 py-2 rounded-xl border border-primary-700 text-gray-400 hover:border-secondary-500/40 hover:text-secondary-400 transition-colors text-sm">

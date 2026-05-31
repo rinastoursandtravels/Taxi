@@ -128,7 +128,6 @@ export default function Footer() {
             { href: '/hollongi-airport-taxi', label: 'Hollongi Airport Taxi' },
             { href: '/donyi-polo-airport-taxi', label: 'Donyi Polo Airport Taxi' },
             { href: '/itanagar-airport-taxi', label: 'Itanagar Airport Taxi' },
-            { href: '/hourly-taxi-itanagar', label: 'Hourly Taxi Itanagar' },
             { href: '/arunachal-tours', label: 'Arunachal Tours' },
             { href: '/itanagar-tours', label: 'Itanagar Tours' },
           ].map((link) => (

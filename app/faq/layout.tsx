@@ -3,7 +3,7 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = {
   title: 'FAQ – Taxi & Tour Booking Help',
   description:
-    "Frequently asked questions about booking airport taxis from Hollongi (Donyi Polo Airport), hourly taxi rentals, and tour packages in Itanagar and Arunachal Pradesh. Get instant answers.",
+    "Frequently asked questions about booking airport taxis from Hollongi (Donyi Polo Airport) and tour packages in Itanagar and Arunachal Pradesh. Get instant answers.",
   keywords: [
     'hollongi airport taxi faq',
     'taxi booking help itanagar',
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'FAQ – Taxi & Tour Booking Help | Rina\'s Tours and Travels',
     description:
-      "Answers to common questions about airport taxi booking from Hollongi, hourly rentals, and Arunachal Pradesh tour packages.",
+      "Answers to common questions about airport taxi booking from Hollongi and Arunachal Pradesh tour packages.",
     url: '/faq',
   },
 }

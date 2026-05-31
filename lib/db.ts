@@ -22,7 +22,7 @@ export interface TourPackage {
 export interface Booking {
   id: string
   booking_id: string
-  booking_type: 'airport' | 'tour' | 'hourly'
+  booking_type: 'taxi' | 'tour'
   user_name: string
   user_email: string | null
   phone: string
@@ -31,7 +31,6 @@ export interface Booking {
   end_datetime: string
   destination_id: string | null
   tour_package_id: string | null
-  no_of_hours: number | null
   car_model: string | null
   amount_total: number
   booking_status: 'pending' | 'confirmed' | 'completed' | 'cancelled'

@@ -35,8 +35,6 @@ export type ConflictCar = {
   class?: string | null
   number_plate?: string | null
   capacity?: number | null
-  per_km_charge?: number | null
-  per_hr_charge?: number | null
   driver_name?: string | null
   driver_phone?: string | null
   driver_email?: string | null
@@ -52,8 +50,6 @@ export type ModelAvailability = {
   model_name: string
   class: string
   capacity: number
-  per_km_charge: number
-  per_hr_charge: number
   total_count: number
   assigned_count: number
   unassigned_count: number
@@ -178,7 +174,7 @@ async function loadFleetState(): Promise<FleetState> {
       .select('id, booking_id, car_id, start_datetime, end_datetime, assigned_at, created_at'),
     supabaseAdmin
       .from('cars')
-      .select('id, model_name, class, number_plate, capacity, per_km_charge, per_hr_charge, driver_name, driver_phone, driver_email, is_active')
+      .select('id, model_name, class, number_plate, capacity, driver_name, driver_phone, driver_email, is_active')
       .eq('is_active', true),
   ])
 
@@ -275,8 +271,6 @@ function buildModelAvailabilitySnapshot(
         model_name: modelName,
         class: rep.class || '',
         capacity: Number(rep.capacity || 0),
-        per_km_charge: Number(rep.per_km_charge || 0),
-        per_hr_charge: Number(rep.per_hr_charge || 0),
         total_count: cars.length,
         assigned_count: assignedCount,
         unassigned_count: unassignedCount,

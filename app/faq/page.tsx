@@ -27,15 +27,6 @@ const FAQ_ITEMS = [
     q: 'Is the pricing fixed or metered from Donyi Polo Airport?',
     a: 'All fares are fixed and shown transparently at the time of booking. There are no hidden charges or surprise fees.',
   },
-  // Hourly
-  {
-    q: 'What is hourly taxi booking and how does it work?',
-    a: 'Hourly taxi rental lets you hire a cab for a set number of hours with a driver. Ideal for city sightseeing, multiple stops, or flexible travel within Itanagar. Book by choosing your duration during the booking flow.',
-  },
-  {
-    q: 'What is the minimum duration for hourly taxi booking?',
-    a: 'Hourly bookings are available for a minimum of 4 hours. For shorter trips from the airport, the standard point-to-point taxi booking is the better option.',
-  },
   // Tours
   {
     q: 'What tour packages are available in Arunachal Pradesh?',
@@ -48,7 +39,7 @@ const FAQ_ITEMS = [
   // Booking & payment
   {
     q: 'How do I book a taxi?',
-    a: "Go to Book Taxi, select your booking type (airport or hourly), fill in your details and schedule, then confirm. You'll receive booking details by email and in your account.",
+    a: "Go to Book Taxi, select your destination, date, time and vehicle, then confirm. You'll receive booking details by email and in your account.",
   },
   {
     q: 'Can I cancel or modify a booking?',
@@ -105,7 +96,7 @@ export default function FAQPage() {
         <div className="max-w-3xl mx-auto">
           <p className="text-secondary-500 font-semibold text-xs uppercase tracking-widest mb-2">Support</p>
           <h1 className="text-3xl md:text-4xl font-black mb-3">Frequently Asked Questions</h1>
-          <p className="text-gray-400 mb-8">Common questions about airport taxi booking from Hollongi, hourly rentals, tour packages, and payments — clear answers to help you travel smarter.</p>
+          <p className="text-gray-400 mb-8">Common questions about airport taxi booking from Hollongi, tour packages, and payments — clear answers to help you travel smarter.</p>
 
           <section aria-label="Frequently asked questions" className="space-y-4">
             {FAQ_ITEMS.map((it, idx) => (

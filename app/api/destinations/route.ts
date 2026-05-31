@@ -8,7 +8,6 @@ export async function GET() {
       .select(`
         id,
         name,
-        distance_km,
         estimated_duration_minutes,
         description,
         is_active,
@@ -32,9 +31,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, distance_km, estimated_duration_minutes, description } = body
+    const { name, estimated_duration_minutes, description } = body
 
-    if (!name || !distance_km || estimated_duration_minutes == null) {
+    if (!name || estimated_duration_minutes == null) {
       return NextResponse.json(
         { success: false, error: 'Missing required fields' },
         { status: 400 }
@@ -52,7 +51,6 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabaseAdmin.from('destinations').insert([
       {
         name,
-        distance_km: parseFloat(distance_km),
         estimated_duration_minutes: minutes,
         description: description || null,
         is_active: true,

@@ -24,9 +24,7 @@ export async function POST(request: NextRequest) {
       bookingData.passenger_count === undefined ||
       bookingData.passenger_count === null ||
       !bookingData.booking_date ||
-      !bookingData.start_time ||
-      bookingData.amount_total === undefined ||
-      bookingData.amount_total === null
+      !bookingData.start_time
     ) {
       const missingFields = []
       if (!bookingData.booking_id) missingFields.push('booking_id')
@@ -36,7 +34,6 @@ export async function POST(request: NextRequest) {
       if (bookingData.passenger_count === undefined || bookingData.passenger_count === null) missingFields.push('passenger_count')
       if (!bookingData.booking_date) missingFields.push('booking_date')
       if (!bookingData.start_time) missingFields.push('start_time')
-      if (bookingData.amount_total === undefined || bookingData.amount_total === null) missingFields.push('amount_total')
 
       return Response.json(
         { 
@@ -48,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate booking_type enum
-    const validBookingTypes = ['airport', 'tour', 'hourly']
+    const validBookingTypes = ['taxi', 'tour']
     if (!validBookingTypes.includes(bookingData.booking_type)) {
       return Response.json(
         { error: `Invalid booking_type. Must be one of: ${validBookingTypes.join(', ')}` },
@@ -56,16 +53,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (bookingData.booking_type === 'airport' && !bookingData.destination_id) {
+    if (bookingData.booking_type === 'taxi' && !bookingData.destination_id) {
       return Response.json(
-        { success: false, error: 'destination_id is required for airport bookings' },
-        { status: 400 }
-      )
-    }
-
-    if (bookingData.booking_type === 'hourly' && !bookingData.no_of_hours) {
-      return Response.json(
-        { success: false, error: 'no_of_hours is required for hourly bookings' },
+        { success: false, error: 'destination_id is required for taxi bookings' },
         { status: 400 }
       )
     }
@@ -89,14 +79,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Ensure amount_total is a positive number
-    const amountTotal = parseFloat(String(bookingData.amount_total))
-    if (isNaN(amountTotal) || amountTotal <= 0) {
-      return Response.json(
-        { error: 'amount_total must be a positive number' },
-        { status: 400 }
-      )
-    }
+    let amountTotal = Number(bookingData.amount_total || 0)
 
     // Create start_datetime from booking_date and start_time (in IST)
     let startDateTimeStr: string
@@ -114,11 +97,7 @@ export async function POST(request: NextRequest) {
     let durationMinutes = 0
     let tourPkg: { duration_hours: number | null; max_passengers: number | null; car_model: string | null } | null = null
 
-    if (bookingData.booking_type === 'hourly' && bookingData.no_of_hours) {
-      // For hourly bookings: use the provided no_of_hours directly
-      durationMinutes = parseFloat(String(bookingData.no_of_hours)) * 60
-      console.log(`Hourly booking: ${bookingData.no_of_hours} hrs (${durationMinutes} minutes)`)
-    } else if (bookingData.booking_type === 'tour' && bookingData.tour_package_id) {
+    if (bookingData.booking_type === 'tour' && bookingData.tour_package_id) {
       // For tour bookings: fetch authoritative package data from the database.
       try {
         const { data: fetchedTourPkg, error: tourErr } = await supabaseAdmin
@@ -156,7 +135,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     } else if (bookingData.destination_id) {
-      // For airport bookings: use estimated_duration_minutes directly from the destination
+      // For taxi bookings: use estimated_duration_minutes directly from the destination
       try {
         const { data: destination, error: destError } = await supabaseAdmin
           .from('destinations')
@@ -200,14 +179,6 @@ export async function POST(request: NextRequest) {
     endDateTimeStr = addMinutesToISTDateTime(startDateTimeStr, durationMinutes)
     console.log(`Start: ${startDateTimeStr}, End: ${endDateTimeStr}, Duration: ${durationMinutes} minutes (${(durationMinutes / 60).toFixed(2)} hours)`)
 
-    // Determine no_of_hours
-    // - For "hourly": use what the user selected
-    // - For "airport" / "tour": always NULL
-    let noOfHours: number | null = null
-    if (bookingData.booking_type === 'hourly' && bookingData.no_of_hours) {
-      noOfHours = parseFloat(String(bookingData.no_of_hours))
-    }
-
     const resolvedCarModel =
       bookingData.booking_type === 'tour'
         ? (tourPkg?.car_model || bookingData.car_model || null)
@@ -215,7 +186,7 @@ export async function POST(request: NextRequest) {
 
     if (bookingData.booking_type !== 'tour' && !resolvedCarModel) {
       return Response.json(
-        { success: false, error: 'car_model is required for airport and hourly bookings' },
+        { success: false, error: 'car_model is required for taxi bookings' },
         { status: 400 }
       )
     }
@@ -225,6 +196,42 @@ export async function POST(request: NextRequest) {
         { success: false, error: `This tour allows a maximum of ${tourPkg.max_passengers} passenger(s)` },
         { status: 400 }
       )
+    }
+
+    if (bookingData.booking_type === 'tour') {
+      if (!Number.isFinite(amountTotal) || amountTotal <= 0) {
+        return Response.json(
+          { error: 'amount_total must be a positive number' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (bookingData.booking_type === 'taxi' && resolvedCarModel) {
+      const { data: fareRow, error: fareError } = await supabaseAdmin
+        .from('destination_car_fares')
+        .select('fixed_fare')
+        .eq('destination_id', bookingData.destination_id)
+        .eq('model_name', resolvedCarModel)
+        .maybeSingle()
+
+      if (fareError) {
+        console.error('Error validating destination fare:', fareError)
+        return Response.json(
+          { success: false, error: 'Failed to validate destination fare' },
+          { status: 500 }
+        )
+      }
+
+      const fixedFare = Number(fareRow?.fixed_fare || 0)
+      if (!Number.isFinite(fixedFare) || fixedFare <= 0) {
+        return Response.json(
+          { success: false, error: `${resolvedCarModel} is not available for the selected destination` },
+          { status: 409 }
+        )
+      }
+
+      amountTotal = fixedFare
     }
 
     if (resolvedCarModel && bookingData.booking_type !== 'tour') {
@@ -297,7 +304,6 @@ export async function POST(request: NextRequest) {
       end_datetime: endDateTimeStr,
       destination_id: bookingData.destination_id || null,
       tour_package_id: bookingData.tour_package_id || null,
-      no_of_hours: noOfHours,
       car_model: resolvedCarModel,
       amount_total: amountTotal,
       booking_status: 'pending',
@@ -313,6 +319,15 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('Error creating booking:', error)
+      if (error.code === '22P02' && String(error.message || '').includes('booking_type_enum')) {
+        return Response.json(
+          {
+            success: false,
+            error: 'Database schema is stale: booking_type_enum does not yet allow "taxi". Recreate or update the DB schema so booking_type_enum contains only taxi and tour.',
+          },
+          { status: 500 }
+        )
+      }
       return Response.json(
         { error: `Failed to create booking: ${error.message}`, details: error },
         { status: 500 }

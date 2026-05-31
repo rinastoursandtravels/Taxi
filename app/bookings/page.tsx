@@ -560,11 +560,11 @@ export default function MyBookings() {
               {bookings.map((booking) => {
                 const statusBadge = getStatusBadge(booking.booking_status)
                 const bookingTypeLabel =
-                  booking.booking_type === 'airport'
-                    ? 'Airport Transfer'
+                  booking.booking_type === 'taxi'
+                    ? 'Taxi Booking'
                     : booking.booking_type === 'tour'
                     ? 'Tour'
-                    : 'Hourly Rental'
+                    : 'Taxi Booking'
                 const assignment = assignmentMap[booking.booking_id || booking.id]
                 const assignmentCar = assignment?.cars || null
                 const assignmentModel = assignmentCar?.model_name || assignment?.car_model_snapshot || 'Vehicle record deleted'
@@ -622,12 +622,6 @@ export default function MyBookings() {
                           <div>
                             <p className="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Car Model</p>
                             <p className="text-white font-semibold">{booking.car_model}</p>
-                          </div>
-                        )}
-                        {booking.no_of_hours && (
-                          <div>
-                            <p className="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Duration</p>
-                            <p className="text-white font-semibold">{booking.no_of_hours} hr{booking.no_of_hours > 1 ? 's' : ''}</p>
                           </div>
                         )}
                       </div>

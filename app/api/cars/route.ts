@@ -19,8 +19,6 @@ export async function GET(request: NextRequest) {
         class,
         number_plate,
         capacity,
-        per_km_charge,
-        per_hr_charge,
         driver_name,
         driver_phone,
         driver_email,
@@ -60,8 +58,6 @@ export async function POST(request: NextRequest) {
       class: carClass, 
       number_plate,
       capacity,
-      per_km_charge,
-      per_hr_charge,
       driver_name,
       driver_phone,
       driver_email,
@@ -71,7 +67,7 @@ export async function POST(request: NextRequest) {
     } = body
 
     // Validation
-    if (!model_name || !carClass || !number_plate || !capacity || !per_km_charge || !per_hr_charge || !driver_name || !driver_phone) {
+    if (!model_name || !carClass || !number_plate || !capacity || !driver_name || !driver_phone) {
       return NextResponse.json(
         { success: false, error: 'Missing required fields' },
         { status: 400 }
@@ -84,8 +80,6 @@ export async function POST(request: NextRequest) {
         class: carClass,
         number_plate,
         capacity: parseInt(capacity),
-        per_km_charge: parseFloat(per_km_charge),
-        per_hr_charge: parseFloat(per_hr_charge),
         driver_name,
         driver_phone,
         driver_email: driver_email || null,

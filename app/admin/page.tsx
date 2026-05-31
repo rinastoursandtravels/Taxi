@@ -21,8 +21,6 @@ type Car = {
   class: string
   number_plate: string
   capacity: number
-  per_km_charge: number
-  per_hr_charge: number
   driver_name: string
   driver_phone: string
   driver_email: string | null
@@ -42,11 +40,17 @@ type CarsResponse = {
 type Destination = {
   id: string
   name: string
-  distance_km: number
   estimated_duration_minutes: number
   description: string | null
   is_active: boolean
   created_at: string
+}
+
+type DestinationFare = {
+  id: string
+  destination_id: string
+  model_name: string
+  fixed_fare: number
 }
 
 function formatDurationMinutes(minutes: number): string {
@@ -196,8 +200,7 @@ function getPaymentStatusClass(status: string) {
 }
 
 function bookingTypeLabel(type: string | null | undefined) {
-  if (type === 'airport') return 'Airport'
-  if (type === 'hourly') return 'Hourly'
+  if (type === 'taxi') return 'Taxi'
   if (type === 'tour') return 'Tour'
   return type ?? '-'
 }
@@ -372,8 +375,6 @@ export default function AdminDashboard() {
     class: '',
     number_plate: '',
     capacity: '',
-    per_km_charge: '',
-    per_hr_charge: '',
     driver_name: '',
     driver_phone: '',
     driver_email: '',
@@ -383,11 +384,15 @@ export default function AdminDashboard() {
   })
   const [destinationData, setDestinationData] = useState({
     name: '',
-    distance_km: '',
     duration_hours: '',
     duration_mins: '0',
     description: '',
   })
+  const [showDestinationFareModal, setShowDestinationFareModal] = useState(false)
+  const [selectedDestinationForFares, setSelectedDestinationForFares] = useState<Destination | null>(null)
+  const [destinationFaresDraft, setDestinationFaresDraft] = useState<Record<string, string>>({})
+  const [loadingDestinationFares, setLoadingDestinationFares] = useState(false)
+  const [savingDestinationFares, setSavingDestinationFares] = useState(false)
   const [tourData, setTourData] = useState<{
     name: string; description: string; arrival_time: string; duration_hours: string;
     price: string; max_passengers: string; car_model: string; itinerary: string;
@@ -1234,7 +1239,7 @@ export default function AdminDashboard() {
     e.preventDefault()
 
     const durationMins = parseInt(destinationData.duration_hours || '0') * 60 + parseInt(destinationData.duration_mins || '0')
-    if (!destinationData.name || !destinationData.distance_km || durationMins <= 0) {
+    if (!destinationData.name || durationMins <= 0) {
       toast.error('Please fill all required fields including a valid duration')
       return
     }
@@ -1245,7 +1250,6 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: destinationData.name,
-          distance_km: destinationData.distance_km,
           estimated_duration_minutes: durationMins,
           description: destinationData.description,
         }),
@@ -1258,7 +1262,7 @@ export default function AdminDashboard() {
       }
 
       toast.success('Destination added successfully!')
-      setDestinationData({ name: '', distance_km: '', duration_hours: '', duration_mins: '0', description: '' })
+      setDestinationData({ name: '', duration_hours: '', duration_mins: '0', description: '' })
       setShowAddDestination(false)
       loadDestinations()
     } catch (error) {
@@ -1273,7 +1277,7 @@ export default function AdminDashboard() {
     if (!editingDestination) return
 
     const durationMins = parseInt(destinationData.duration_hours || '0') * 60 + parseInt(destinationData.duration_mins || '0')
-    if (!destinationData.name || !destinationData.distance_km || durationMins <= 0) {
+    if (!destinationData.name || durationMins <= 0) {
       toast.error('Please fill all required fields including a valid duration')
       return
     }
@@ -1284,7 +1288,6 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: destinationData.name,
-          distance_km: destinationData.distance_km,
           estimated_duration_minutes: durationMins,
           description: destinationData.description,
         }),
@@ -1297,7 +1300,7 @@ export default function AdminDashboard() {
       }
 
       toast.success('Destination updated successfully!')
-      setDestinationData({ name: '', distance_km: '', duration_hours: '', duration_mins: '0', description: '' })
+      setDestinationData({ name: '', duration_hours: '', duration_mins: '0', description: '' })
       setEditingDestination(null)
       loadDestinations()
     } catch (error) {
@@ -1328,11 +1331,80 @@ export default function AdminDashboard() {
     }
   }
 
+  const openDestinationFareModal = async (destination: Destination) => {
+    console.log('[ADMIN] Opening destination fare modal for:', destination.id, destination.name)
+    setSelectedDestinationForFares(destination)
+    setShowDestinationFareModal(true)
+    setLoadingDestinationFares(true)
+    try {
+      const response = await fetch(`/api/admin/destination-fares?destination_id=${destination.id}`, {
+        headers: adminHeaders(),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to load destination fares')
+      }
+
+      const draft: Record<string, string> = {}
+      ;(result.fares || []).forEach((row: DestinationFare) => {
+        draft[row.model_name] = String(row.fixed_fare)
+      })
+      setDestinationFaresDraft(draft)
+    } catch (error) {
+      console.error('Error loading destination fares:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to load destination fares')
+      setDestinationFaresDraft({})
+    } finally {
+      setLoadingDestinationFares(false)
+    }
+  }
+
+  const closeDestinationFareModal = () => {
+    setShowDestinationFareModal(false)
+    setSelectedDestinationForFares(null)
+    setDestinationFaresDraft({})
+    setLoadingDestinationFares(false)
+    setSavingDestinationFares(false)
+  }
+
+  const handleSaveDestinationFares = async () => {
+    if (!selectedDestinationForFares) return
+
+    const fares = activeCarModels
+      .map((modelName) => ({
+        model_name: modelName,
+        fixed_fare: Number(destinationFaresDraft[modelName] || 0),
+      }))
+      .filter((item) => Number.isFinite(item.fixed_fare) && item.fixed_fare > 0)
+
+    setSavingDestinationFares(true)
+    try {
+      const response = await fetch('/api/admin/destination-fares', {
+        method: 'PUT',
+        headers: adminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          destination_id: selectedDestinationForFares.id,
+          fares,
+        }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to save destination fares')
+      }
+      toast.success('Destination fares updated successfully!')
+      closeDestinationFareModal()
+    } catch (error) {
+      console.error('Error saving destination fares:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to save destination fares')
+    } finally {
+      setSavingDestinationFares(false)
+    }
+  }
+
   const startEditDestination = (destination: Destination) => {
     setEditingDestination(destination)
     setDestinationData({
       name: destination.name,
-      distance_km: destination.distance_km.toString(),
       duration_hours: String(Math.floor(destination.estimated_duration_minutes / 60)),
       duration_mins: String(destination.estimated_duration_minutes % 60),
       description: destination.description || '',
@@ -1342,14 +1414,14 @@ export default function AdminDashboard() {
 
   const cancelEditDestination = () => {
     setEditingDestination(null)
-    setDestinationData({ name: '', distance_km: '', duration_hours: '', duration_mins: '0', description: '' })
+    setDestinationData({ name: '', duration_hours: '', duration_mins: '0', description: '' })
     setShowAddDestination(false)
   }
 
   const handleAddCar = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.model_name || !formData.class || !formData.number_plate || !formData.capacity || !formData.per_km_charge || !formData.per_hr_charge || !formData.driver_name || !formData.driver_phone) {
+    if (!formData.model_name || !formData.class || !formData.number_plate || !formData.capacity || !formData.driver_name || !formData.driver_phone) {
       toast.error('Please fill all required fields')
       return
     }
@@ -1377,8 +1449,6 @@ export default function AdminDashboard() {
         class: '',
         capacity: '',
         number_plate: '',
-        per_km_charge: '',
-        per_hr_charge: '',
         driver_name: '',
         driver_phone: '',
         driver_email: '',
@@ -1399,7 +1469,7 @@ export default function AdminDashboard() {
 
     if (!editingCar) return
 
-    if (!formData.model_name || !formData.class || !formData.number_plate || !formData.capacity || !formData.per_km_charge || !formData.per_hr_charge || !formData.driver_name || !formData.driver_phone) {
+    if (!formData.model_name || !formData.class || !formData.number_plate || !formData.capacity || !formData.driver_name || !formData.driver_phone) {
       toast.error('Please fill all required fields')
       return
     }
@@ -1427,8 +1497,6 @@ export default function AdminDashboard() {
         class: '',
         capacity: '',
         number_plate: '',
-        per_km_charge: '',
-        per_hr_charge: '',
         driver_name: '',
         driver_phone: '',
         driver_email: '',
@@ -1506,8 +1574,6 @@ export default function AdminDashboard() {
       class: car.class,
       number_plate: car.number_plate,
       capacity: car.capacity.toString(),
-      per_km_charge: car.per_km_charge.toString(),
-      per_hr_charge: car.per_hr_charge.toString(),
       driver_name: car.driver_name,
       driver_phone: car.driver_phone,
       driver_email: car.driver_email || '',
@@ -1529,8 +1595,6 @@ export default function AdminDashboard() {
       class: '',
       number_plate: '',
       capacity: '',
-      per_km_charge: '',
-      per_hr_charge: '',
       driver_name: '',
       driver_phone: '',
       driver_email: '',
@@ -1595,6 +1659,19 @@ export default function AdminDashboard() {
     ))
   }, [destinations, destinationSearchQuery])
 
+  const activeCarModels = useMemo(() => {
+    const models = Array.from(
+      new Set(
+        cars
+          .filter((car) => car.is_active)
+          .map((car) => String(car.model_name || '').trim())
+          .filter(Boolean)
+      )
+    )
+    models.sort((a, b) => a.localeCompare(b))
+    return models
+  }, [cars])
+
   const destinationNameById = useMemo(
     () =>
       destinations.reduce<Record<string, string>>((acc, destination) => {
@@ -1620,10 +1697,6 @@ export default function AdminDashboard() {
 
     if (booking.destination_id) {
       return destinationNameById[booking.destination_id] || 'Destination unavailable'
-    }
-
-    if (booking.booking_type === 'hourly' && booking.no_of_hours != null) {
-      return `${booking.no_of_hours} hour${booking.no_of_hours === 1 ? '' : 's'} booking`
     }
 
     return bookingTypeLabel(booking.booking_type)
@@ -2076,9 +2149,7 @@ export default function AdminDashboard() {
                   : 'Tour package'
                 : booking.destination_id
                   ? `Destination ID: ${booking.destination_id}`
-                  : booking.booking_type === 'hourly' && booking.no_of_hours != null
-                    ? `${booking.no_of_hours} hour${booking.no_of_hours === 1 ? '' : 's'} reserved`
-                    : 'Route details unavailable'
+                  : 'Route details unavailable'
               const cardShellClass = darkMode
                 ? 'border border-primary-700/70 bg-primary-900/50 shadow-lg shadow-black/10'
                 : 'border border-slate-200 bg-white shadow-sm shadow-slate-200/70'
@@ -2161,6 +2232,7 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
     </div>
   )
 
@@ -2407,12 +2479,6 @@ export default function AdminDashboard() {
                                   <div className="font-medium">{destinationName || 'Destination unavailable'}</div>
                                   <div className="font-mono text-xs break-all">{booking.destination_id}</div>
                                 </dd>
-                              </div>
-                            )}
-                            {booking.no_of_hours != null && (
-                              <div className="flex justify-between gap-2">
-                                <dt className="text-gray-500 shrink-0">no_of_hours</dt>
-                                <dd>{booking.no_of_hours}</dd>
                               </div>
                             )}
                             <div className="flex justify-between gap-2 pt-2 border-t font-semibold">
@@ -2767,7 +2833,198 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
     </div>
+  )
+
+  const renderCarForm = ({
+    onSubmit,
+    submitLabel,
+    listId,
+  }: {
+    onSubmit: (e: React.FormEvent) => void
+    submitLabel: string
+    listId: string
+  }) => (
+    <form onSubmit={onSubmit} className="space-y-4 md:space-y-6">
+      <div>
+        <h4 className="text-base md:text-lg font-semibold mb-3 md:mb-4 text-gray-700">Car Details</h4>
+        <datalist id={listId}>
+          {[...new Set(cars.map(c => c.model_name))].sort().map(name => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex flex-col gap-1">
+            <input
+              type="text"
+              list={listId}
+              placeholder="Model Name (e.g., Toyota Innova)"
+              className="input-field"
+              value={formData.model_name}
+              onChange={(e) => {
+                const nextValue = e.target.value
+                setFormData({ ...formData, model_name: nextValue })
+                updateCarModelSuggestions(nextValue)
+              }}
+              onBlur={(e) => {
+                updateCarModelSuggestions(e.target.value)
+              }}
+              required
+            />
+            {carModelWarning.length > 0 && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <p className="font-semibold mb-1">
+                  {carModelWarningSource === 'existing'
+                    ? `Similar model name${carModelWarning.length > 1 ? 's' : ''} already exist in your cars - did you mean:`
+                    : 'Did you mean one of these common commercial model names?'}
+                </p>
+                {carModelWarningSource === 'library' && (
+                  <p className="mb-2 text-[11px] text-amber-700">
+                    No close match was found in your current car models, so this suggestion comes from the internal reference list.
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {carModelWarning.map(name => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => {
+                        setFormData(f => ({ ...f, model_name: name }))
+                        setCarModelWarning([])
+                        setCarModelWarningSource(null)
+                        setLastCarModelSuggestions([])
+                        setLastCarModelSuggestionSource(null)
+                      }}
+                      className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 border border-amber-400 rounded font-medium transition-colors"
+                    >
+                      {name}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCarModelWarning([])
+                      setCarModelWarningSource(null)
+                    }}
+                    className="px-2 py-0.5 text-amber-600 hover:text-amber-800 underline"
+                  >
+                    Keep what I typed
+                  </button>
+                </div>
+              </div>
+            )}
+            {carModelWarning.length === 0 && lastCarModelSuggestions.length > 0 && (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[11px] text-gray-500">Suggestions hidden.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCarModelWarning(lastCarModelSuggestions)
+                    setCarModelWarningSource(lastCarModelSuggestionSource)
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                >
+                  Show suggestions again
+                </button>
+              </div>
+            )}
+          </div>
+          <input
+            type="text"
+            placeholder="Class (e.g., Premium, Economy, Luxury)"
+            className="input-field"
+            value={formData.class}
+            onChange={(e) => setFormData({ ...formData, class: e.target.value })}
+            required
+          />
+          <input
+            type="text"
+            placeholder="Number Plate (e.g., AP-01-XY-1234)"
+            className="input-field"
+            value={formData.number_plate}
+            onChange={(e) => setFormData({ ...formData, number_plate: e.target.value })}
+            required
+          />
+          <input
+            type="number"
+            placeholder="Capacity (e.g., 4)"
+            className="input-field"
+            value={formData.capacity}
+            onChange={(e) => setFormData({ ...formData, capacity: e.target.value })}
+            required
+          />
+        </div>
+      </div>
+
+      <div>
+        <h4 className="text-base md:text-lg font-semibold mb-3 md:mb-4 text-gray-700">Driver Details</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input
+            type="text"
+            placeholder="Driver Name (required)"
+            className="input-field"
+            value={formData.driver_name}
+            onChange={(e) => setFormData({ ...formData, driver_name: e.target.value })}
+            required
+          />
+          <input
+            type="tel"
+            placeholder="Driver Phone (required)"
+            className="input-field"
+            value={formData.driver_phone}
+            onChange={(e) => setFormData({ ...formData, driver_phone: e.target.value })}
+            required
+          />
+          <input
+            type="email"
+            placeholder="Driver Email"
+            className="input-field"
+            value={formData.driver_email}
+            onChange={(e) => setFormData({ ...formData, driver_email: e.target.value })}
+          />
+          <input
+            type="text"
+            placeholder="License Number"
+            className="input-field"
+            value={formData.driver_license_number}
+            onChange={(e) => setFormData({ ...formData, driver_license_number: e.target.value })}
+          />
+          <input
+            type="date"
+            placeholder="License Expiry Date"
+            className="input-field"
+            value={formData.driver_license_expiry}
+            onChange={(e) => setFormData({ ...formData, driver_license_expiry: e.target.value })}
+          />
+          <div className="flex items-center">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.driver_verified}
+                onChange={(e) => setFormData({ ...formData, driver_verified: e.target.checked })}
+                className="w-4 h-4"
+              />
+              <span className="text-gray-700">Driver Verified</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex gap-3 justify-end">
+        <button
+          type="button"
+          onClick={cancelEdit}
+          className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+        <button type="submit" className="btn-primary">
+          {submitLabel}
+        </button>
+      </div>
+    </form>
   )
 
   const renderCarManagement = () => {
@@ -2838,210 +3095,11 @@ export default function AdminDashboard() {
 
     return (
     <div className="space-y-4 md:space-y-6 lg:space-y-8">
-      {/* Add/Edit Car Form */}
-      {(showAddCar || editingCar) && (
+      {/* Add Car Form */}
+      {showAddCar && (
         <div className="bg-white rounded-lg shadow-lg p-4 md:p-8">
-          <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">{editingCar ? 'Edit Car' : 'Add New Car'}</h3>
-          <form onSubmit={editingCar ? handleUpdateCar : handleAddCar} className="space-y-4 md:space-y-6">
-            {/* Car Details */}
-            <div>
-              <h4 className="text-base md:text-lg font-semibold mb-3 md:mb-4 text-gray-700">Car Details</h4>
-              {/* Datalist of existing model names for autocomplete */}
-              <datalist id="car-model-names">
-                {[...new Set(cars.map(c => c.model_name))].sort().map(name => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1">
-                  <input
-                    type="text"
-                    list="car-model-names"
-                    placeholder="Model Name (e.g., Toyota Innova)"
-                    className="input-field"
-                    value={formData.model_name}
-                    onChange={(e) => {
-                      const nextValue = e.target.value
-                      setFormData({ ...formData, model_name: nextValue })
-                      updateCarModelSuggestions(nextValue)
-                    }}
-                    onBlur={(e) => {
-                      updateCarModelSuggestions(e.target.value)
-                    }}
-                    required
-                  />
-                  {carModelWarning.length > 0 && (
-                    <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      <p className="font-semibold mb-1">
-                        {carModelWarningSource === 'existing'
-                          ? `Similar model name${carModelWarning.length > 1 ? 's' : ''} already exist in your cars - did you mean:`
-                          : 'Did you mean one of these common commercial model names?'}
-                      </p>
-                      {carModelWarningSource === 'library' && (
-                        <p className="mb-2 text-[11px] text-amber-700">
-                          No close match was found in your current car models, so this suggestion comes from the internal reference list.
-                        </p>
-                      )}
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {carModelWarning.map(name => (
-                          <button
-                            key={name}
-                            type="button"
-                            onClick={() => {
-                              setFormData(f => ({ ...f, model_name: name }))
-                              setCarModelWarning([])
-                              setCarModelWarningSource(null)
-                              setLastCarModelSuggestions([])
-                              setLastCarModelSuggestionSource(null)
-                            }}
-                            className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 border border-amber-400 rounded font-medium transition-colors"
-                          >
-                            {name}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCarModelWarning([])
-                            setCarModelWarningSource(null)
-                          }}
-                          className="px-2 py-0.5 text-amber-600 hover:text-amber-800 underline"
-                        >
-                          Keep what I typed
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {carModelWarning.length === 0 && lastCarModelSuggestions.length > 0 && (
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="text-[11px] text-gray-500">Suggestions hidden.</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCarModelWarning(lastCarModelSuggestions)
-                          setCarModelWarningSource(lastCarModelSuggestionSource)
-                        }}
-                        className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100 transition-colors"
-                      >
-                        Show suggestions again
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <input
-                  type="text"
-                  placeholder="Class (e.g., Premium, Economy, Luxury)"
-                  className="input-field"
-                  value={formData.class}
-                  onChange={(e) => setFormData({ ...formData, class: e.target.value })}
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="Number Plate (e.g., AP-01-XY-1234)"
-                  className="input-field"
-                  value={formData.number_plate}
-                  onChange={(e) => setFormData({ ...formData, number_plate: e.target.value })}
-                  required
-                />
-                <input
-                  type="number"
-                  placeholder="Capacity (e.g., 4)"
-                  className="input-field"
-                  value={formData.capacity}
-                  onChange={(e) => setFormData({ ...formData, capacity: e.target.value })}
-                  required
-                />
-                <input
-                  type="number"
-                  placeholder="Per KM Charge (Rs.)"
-                  className="input-field"
-                  step="0.01"
-                  value={formData.per_km_charge}
-                  onChange={(e) => setFormData({ ...formData, per_km_charge: e.target.value })}
-                  required
-                />
-                <input
-                  type="number"
-                  placeholder="Per Hour Charge (Rs.)"
-                  className="input-field"
-                  step="0.01"
-                  value={formData.per_hr_charge}
-                  onChange={(e) => setFormData({ ...formData, per_hr_charge: e.target.value })}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Driver Details */}
-            <div>
-              <h4 className="text-base md:text-lg font-semibold mb-3 md:mb-4 text-gray-700">Driver Details</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input
-                  type="text"
-                  placeholder="Driver Name (required)"
-                  className="input-field"
-                  value={formData.driver_name}
-                  onChange={(e) => setFormData({ ...formData, driver_name: e.target.value })}
-                  required
-                />
-                <input
-                  type="tel"
-                  placeholder="Driver Phone (required)"
-                  className="input-field"
-                  value={formData.driver_phone}
-                  onChange={(e) => setFormData({ ...formData, driver_phone: e.target.value })}
-                  required
-                />
-                <input
-                  type="email"
-                  placeholder="Driver Email"
-                  className="input-field"
-                  value={formData.driver_email}
-                  onChange={(e) => setFormData({ ...formData, driver_email: e.target.value })}
-                />
-                <input
-                  type="text"
-                  placeholder="License Number"
-                  className="input-field"
-                  value={formData.driver_license_number}
-                  onChange={(e) => setFormData({ ...formData, driver_license_number: e.target.value })}
-                />
-                <input
-                  type="date"
-                  placeholder="License Expiry Date"
-                  className="input-field"
-                  value={formData.driver_license_expiry}
-                  onChange={(e) => setFormData({ ...formData, driver_license_expiry: e.target.value })}
-                />
-                <div className="flex items-center">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.driver_verified}
-                      onChange={(e) => setFormData({ ...formData, driver_verified: e.target.checked })}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-gray-700">Driver Verified</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3 justify-end">
-              <button
-                type="button"
-                onClick={cancelEdit}
-                className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn-primary">
-                {editingCar ? 'Update Car' : 'Add Car'}
-              </button>
-            </div>
-          </form>
+          <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Add New Car</h3>
+          {renderCarForm({ onSubmit: handleAddCar, submitLabel: 'Add Car', listId: 'car-model-names-add' })}
         </div>
       )}
 
@@ -3049,7 +3107,7 @@ export default function AdminDashboard() {
       <div className="bg-white rounded-lg shadow-lg p-4 md:p-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4 mb-4 md:mb-6">
           <h3 className="text-xl md:text-2xl font-bold">Manage Cars</h3>
-          {!showAddCar && !editingCar && (
+          {!showAddCar && (
             <button onClick={() => setShowAddCar(true)} className="btn-primary text-sm md:text-base">
               Add New Car
             </button>
@@ -3117,8 +3175,6 @@ export default function AdminDashboard() {
                     <th className="text-left py-3 px-4 font-semibold">Class</th>
                     <th className="text-left py-3 px-4 font-semibold">Number Plate</th>
                     <th className="text-left py-3 px-4 font-semibold">Capacity</th>
-                    <th className="text-left py-3 px-4 font-semibold">Per KM</th>
-                    <th className="text-left py-3 px-4 font-semibold">Per Hour</th>
                     <th className="text-left py-3 px-4 font-semibold">Driver Name</th>
                     <th className="text-left py-3 px-4 font-semibold">Driver Phone</th>
                     <th className="text-left py-3 px-4 font-semibold">Status</th>
@@ -3131,7 +3187,7 @@ export default function AdminDashboard() {
                     return (
                       <Fragment key={car.id}>
                         <tr
-                          className={`border-b hover:bg-gray-50 cursor-pointer ${!car.is_active ? 'bg-gray-100 opacity-70' : ''}`}
+                          className={`border-b hover:bg-gray-50 cursor-pointer ${editingCar?.id === car.id ? 'bg-secondary-50/40' : !car.is_active ? 'bg-gray-100 opacity-70' : ''}`}
                           onClick={() => setExpandedCarId(isExpanded ? null : car.id)}
                         >
                           <td className="py-3 px-4 text-gray-400">
@@ -3141,8 +3197,6 @@ export default function AdminDashboard() {
                           <td className="py-3 px-4">{car.class}</td>
                           <td className="py-3 px-4 font-mono">{car.number_plate}</td>
                           <td className="py-3 px-4">{car.capacity} seats</td>
-                          <td className="py-3 px-4">Rs. {car.per_km_charge}</td>
-                          <td className="py-3 px-4">Rs. {car.per_hr_charge}</td>
                           <td className="py-3 px-4">{car.driver_name}</td>
                           <td className="py-3 px-4">{car.driver_phone}</td>
                           <td className="py-3 px-4">
@@ -3160,7 +3214,7 @@ export default function AdminDashboard() {
                                 onClick={() => startEditCar(car)}
                                 className="text-sm text-secondary-500 hover:text-secondary-600"
                               >
-                                Edit
+                                {editingCar?.id === car.id ? 'Editing' : 'Edit'}
                               </button>
                               <button
                                 onClick={() => handleToggleCarActive(car)}
@@ -3179,9 +3233,26 @@ export default function AdminDashboard() {
                             </div>
                           </td>
                         </tr>
+                        {editingCar?.id === car.id && (
+                          <tr className="border-b bg-secondary-50/30">
+                            <td colSpan={10} className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                              <div className="rounded-xl border border-secondary-200 bg-white p-4 shadow-sm">
+                                <div className="mb-4">
+                                  <p className="text-sm font-bold text-gray-900">Editing {car.model_name}</p>
+                                  <p className="text-xs text-gray-500">Update this car in place, then save or cancel.</p>
+                                </div>
+                                {renderCarForm({
+                                  onSubmit: handleUpdateCar,
+                                  submitLabel: 'Update Car',
+                                  listId: `car-model-names-edit-desktop-${car.id}`,
+                                })}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                         {isExpanded && (
                           <tr key={`${car.id}-details`} className={`border-b ${!car.is_active ? 'bg-gray-100 opacity-70' : 'bg-gray-50'}`}>
-                            <td colSpan={11} className="px-6 py-4">
+                            <td colSpan={10} className="px-6 py-4">
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                 <div>
                                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Driver Email</p>
@@ -3233,7 +3304,7 @@ export default function AdminDashboard() {
               {filteredCars.map((car) => {
                 const isExpanded = expandedCarId === car.id
                 return (
-                  <div key={car.id} className={`rounded-lg border transition-all ${!car.is_active ? 'bg-gray-50 border-gray-200' : 'bg-white border-gray-200'} shadow-sm hover:shadow-md`}>
+                  <div key={car.id} className={`rounded-lg border transition-all ${editingCar?.id === car.id ? 'border-secondary-300 bg-white ring-2 ring-secondary-100' : !car.is_active ? 'bg-gray-50 border-gray-200' : 'bg-white border-gray-200'} shadow-sm hover:shadow-md`}>
                     {/* Card Header */}
                     <button
                       onClick={() => setExpandedCarId(isExpanded ? null : car.id)}
@@ -3266,15 +3337,11 @@ export default function AdminDashboard() {
                               <p className="text-sm font-medium">{car.capacity} seats</p>
                             </div>
                             <div>
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Per KM</p>
-                              <p className="text-sm font-medium">Rs. {car.per_km_charge}</p>
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Driver</p>
+                              <p className="text-sm font-medium">{car.driver_name}</p>
                             </div>
                           </div>
                           <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Per Hour</p>
-                              <p className="text-sm font-medium">Rs. {car.per_hr_charge}</p>
-                            </div>
                             <div>
                               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Driver Verified</p>
                               <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${
@@ -3282,6 +3349,10 @@ export default function AdminDashboard() {
                               }`}>
                                 {car.driver_verified ? 'Yes' : 'No'}
                               </span>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Class</p>
+                              <p className="text-sm font-medium">{car.class}</p>
                             </div>
                           </div>
                           <div className="pt-2 border-t border-gray-100">
@@ -3309,7 +3380,7 @@ export default function AdminDashboard() {
                             onClick={() => startEditCar(car)}
                             className="flex-1 py-2 text-sm font-medium text-secondary-600 hover:bg-secondary-50 rounded active:bg-secondary-100 transition-colors"
                           >
-                            Edit
+                            {editingCar?.id === car.id ? 'Editing' : 'Edit'}
                           </button>
                           <button
                             onClick={() => handleToggleCarActive(car)}
@@ -3330,6 +3401,16 @@ export default function AdminDashboard() {
                             <Trash2 size={16} />
                           </button>
                         </div>
+                        {editingCar?.id === car.id && (
+                          <div className="mx-4 mb-4 rounded-xl border border-secondary-200 bg-secondary-50/40 p-3">
+                            <p className="mb-3 text-sm font-bold text-gray-900">Editing this car</p>
+                            {renderCarForm({
+                              onSubmit: handleUpdateCar,
+                              submitLabel: 'Update Car',
+                              listId: `car-model-names-edit-mobile-${car.id}`,
+                            })}
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -3532,7 +3613,7 @@ export default function AdminDashboard() {
                       const widthPct = (clampedEnd - clampedStart) / scheduleWeekDurationMs * 100
                       const booking = bookings.find(b => b.booking_id === assignment.booking_id)
                       const typeColor =
-                        booking?.booking_type === 'airport' ? 'bg-blue-500 hover:bg-blue-600' :
+                        booking?.booking_type === 'taxi' ? 'bg-blue-500 hover:bg-blue-600' :
                         booking?.booking_type === 'tour'    ? 'bg-emerald-500 hover:bg-emerald-600' :
                                                              'bg-purple-500 hover:bg-purple-600'
                       // Use minWidth so even short bookings (minutes) render as a visible bar
@@ -3565,9 +3646,8 @@ export default function AdminDashboard() {
 
             {/* Legend */}
             <div className="flex gap-5 mt-5 pt-4 border-t text-xs text-gray-500">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-500 inline-block" /> Airport</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-500 inline-block" /> Taxi</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-500 inline-block" /> Tour</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-purple-500 inline-block" /> Hourly</span>
             </div>
           </div>
         </div>
@@ -3648,7 +3728,7 @@ export default function AdminDashboard() {
                           const startDate = new Date(assignment.start_datetime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
                           const startTime = new Date(assignment.start_datetime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
                           const endTime = new Date(assignment.end_datetime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
-                          const typeColor = booking?.booking_type === 'airport' ? 'bg-blue-100 text-blue-800' :
+                          const typeColor = booking?.booking_type === 'taxi' ? 'bg-blue-100 text-blue-800' :
                                            booking?.booking_type === 'tour' ? 'bg-emerald-100 text-emerald-800' :
                                            'bg-purple-100 text-purple-800'
                           return (
@@ -3681,9 +3761,8 @@ export default function AdminDashboard() {
 
           {/* Legend */}
           <div className="flex gap-3 mt-3 pt-3 border-t text-xs text-gray-500 justify-center">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-blue-500 inline-block" /> Airport</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-blue-500 inline-block" /> Taxi</span>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500 inline-block" /> Tour</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-purple-500 inline-block" /> Hourly</span>
           </div>
         </div>
       </div>
@@ -3731,7 +3810,7 @@ export default function AdminDashboard() {
                     <div>
                       <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-0.5">Type</p>
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        selectedScheduleAssignment.booking.booking_type === 'airport' ? 'bg-blue-100 text-blue-800' :
+                        selectedScheduleAssignment.booking.booking_type === 'taxi' ? 'bg-blue-100 text-blue-800' :
                         selectedScheduleAssignment.booking.booking_type === 'tour'    ? 'bg-emerald-100 text-emerald-800' :
                                                                                         'bg-purple-100 text-purple-800'
                       }`}>
@@ -3768,16 +3847,79 @@ export default function AdminDashboard() {
         </div>
       )}
     </div>
-    )
-  }
+  )
+  };
+
+  const renderDestinationEditForm = (compact = false) => (
+    <form onSubmit={handleUpdateDestination} className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input
+          type="text"
+          placeholder="Destination Name (e.g., Guwahati)"
+          className="input-field"
+          value={destinationData.name}
+          onChange={(e) => setDestinationData({ ...destinationData, name: e.target.value })}
+          required
+        />
+        <div className="flex gap-2 items-center">
+          <div className="flex-1">
+            <label className="block text-xs text-gray-500 mb-1">Duration - Hours *</label>
+            <input
+              type="number"
+              placeholder="e.g. 4"
+              className="input-field w-full"
+              min="0"
+              max="99"
+              value={destinationData.duration_hours}
+              onChange={(e) => setDestinationData({ ...destinationData, duration_hours: e.target.value })}
+              required
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-gray-500 mb-1">Minutes</label>
+            <select
+              className="input-field w-full"
+              value={destinationData.duration_mins}
+              onChange={(e) => setDestinationData({ ...destinationData, duration_mins: e.target.value })}
+            >
+              <option value="0">0 mins</option>
+              <option value="15">15 mins</option>
+              <option value="30">30 mins</option>
+              <option value="45">45 mins</option>
+            </select>
+          </div>
+        </div>
+        <input
+          type="text"
+          placeholder="Description (optional)"
+          className={`input-field ${compact ? '' : 'md:col-span-2'}`}
+          value={destinationData.description}
+          onChange={(e) => setDestinationData({ ...destinationData, description: e.target.value })}
+        />
+      </div>
+
+      <div className="flex gap-3 justify-end">
+        <button
+          type="button"
+          onClick={cancelEditDestination}
+          className="px-5 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-semibold"
+        >
+          Cancel
+        </button>
+        <button type="submit" className="btn-primary text-sm">
+          Update Destination
+        </button>
+      </div>
+    </form>
+  )
 
   const renderDestinations = () => (
     <div className="space-y-4 md:space-y-6 lg:space-y-8">
-      {/* Add/Edit Destination Form */}
-      {(showAddDestination || editingDestination) && (
+      {/* Add Destination Form */}
+      {showAddDestination && (
         <div className="bg-white rounded-lg shadow-lg p-4 md:p-8">
-          <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">{editingDestination ? 'Edit Destination' : 'Add New Destination'}</h3>
-          <form onSubmit={editingDestination ? handleUpdateDestination : handleAddDestination} className="space-y-4">
+          <h3 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Add New Destination</h3>
+          <form onSubmit={handleAddDestination} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <input
                 type="text"
@@ -3785,15 +3927,6 @@ export default function AdminDashboard() {
                 className="input-field"
                 value={destinationData.name}
                 onChange={(e) => setDestinationData({ ...destinationData, name: e.target.value })}
-                required
-              />
-              <input
-                type="number"
-                placeholder="Distance (KM)"
-                className="input-field"
-                step="0.1"
-                value={destinationData.distance_km}
-                onChange={(e) => setDestinationData({ ...destinationData, distance_km: e.target.value })}
                 required
               />
               <div className="flex gap-2 items-center">
@@ -3842,7 +3975,7 @@ export default function AdminDashboard() {
                 Cancel
               </button>
               <button type="submit" className="btn-primary">
-                {editingDestination ? 'Update Destination' : 'Add Destination'}
+                Add Destination
               </button>
             </div>
           </form>
@@ -3896,7 +4029,6 @@ export default function AdminDashboard() {
                 <thead>
                   <tr className="border-b">
                     <th className="text-left py-3 px-4 font-semibold">Name</th>
-                    <th className="text-left py-3 px-4 font-semibold">Distance (KM)</th>
                     <th className="text-left py-3 px-4 font-semibold">Estimated Duration</th>
                     <th className="text-left py-3 px-4 font-semibold">Description</th>
                     <th className="text-left py-3 px-4 font-semibold">Actions</th>
@@ -3904,28 +4036,48 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody>
                   {filteredDestinations.map((destination) => (
-                    <tr key={destination.id} className="border-b hover:bg-gray-50">
-                      <td className="py-3 px-4 font-semibold">{destination.name}</td>
-                      <td className="py-3 px-4">{destination.distance_km}</td>
-                      <td className="py-3 px-4">{formatDurationMinutes(destination.estimated_duration_minutes)}</td>
-                      <td className="py-3 px-4">{destination.description || '-'}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => startEditDestination(destination)}
-                            className="text-sm text-secondary-500 hover:text-secondary-600"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDestination(destination.id)}
-                            className="text-sm text-red-500 hover:text-red-600"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                    <Fragment key={destination.id}>
+                      <tr className={`border-b hover:bg-gray-50 ${editingDestination?.id === destination.id ? 'bg-secondary-50/40' : ''}`}>
+                        <td className="py-3 px-4 font-semibold">{destination.name}</td>
+                        <td className="py-3 px-4">{formatDurationMinutes(destination.estimated_duration_minutes)}</td>
+                        <td className="py-3 px-4">{destination.description || '-'}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => openDestinationFareModal(destination)}
+                              className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-semibold text-sky-700 transition-colors hover:border-sky-300 hover:bg-sky-100"
+                            >
+                              Assign Fares
+                            </button>
+                            <button
+                              onClick={() => startEditDestination(destination)}
+                              className="text-sm text-secondary-500 hover:text-secondary-600"
+                            >
+                              {editingDestination?.id === destination.id ? 'Editing' : 'Edit'}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDestination(destination.id)}
+                              className="text-sm text-red-500 hover:text-red-600"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {editingDestination?.id === destination.id && (
+                        <tr className="border-b bg-secondary-50/30">
+                          <td colSpan={4} className="px-4 py-4">
+                            <div className="rounded-xl border border-secondary-200 bg-white p-4 shadow-sm">
+                              <div className="mb-3">
+                                <p className="text-sm font-bold text-gray-900">Editing {destination.name}</p>
+                                <p className="text-xs text-gray-500">Update details in place, then save or cancel.</p>
+                              </div>
+                              {renderDestinationEditForm()}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -3934,12 +4086,12 @@ export default function AdminDashboard() {
             {/* Mobile Card View */}
             <div className="md:hidden grid grid-cols-1 gap-3">
               {filteredDestinations.map((destination) => (
-                <div key={destination.id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+                <div key={destination.id} className={`rounded-lg border bg-white p-4 shadow-sm hover:shadow-md transition-shadow ${editingDestination?.id === destination.id ? 'border-secondary-300 ring-2 ring-secondary-100' : 'border-gray-200'}`}>
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="flex-1">
                       <h4 className="font-semibold text-base text-gray-900">{destination.name}</h4>
                       <p className="text-xs text-gray-500 mt-1">
-                        {destination.distance_km} km • {formatDurationMinutes(destination.estimated_duration_minutes)}
+                        {formatDurationMinutes(destination.estimated_duration_minutes)}
                       </p>
                     </div>
                   </div>
@@ -3948,12 +4100,18 @@ export default function AdminDashboard() {
                     <p className="text-sm text-gray-600 mb-4 line-clamp-2">{destination.description}</p>
                   )}
                   
-                        <div className="pt-3 border-t border-gray-100 flex items-center gap-2">
+                  <div className="pt-3 border-t border-gray-100 flex items-center gap-2">
+                    <button
+                      onClick={() => openDestinationFareModal(destination)}
+                      className="flex-1 rounded-xl border border-sky-200 bg-sky-50 py-2 text-sm font-semibold text-sky-700 transition-colors hover:border-sky-300 hover:bg-sky-100 active:bg-sky-100"
+                    >
+                      Assign Fares
+                    </button>
                     <button
                       onClick={() => startEditDestination(destination)}
                       className="flex-1 py-2 text-sm font-medium text-secondary-600 hover:bg-secondary-50 rounded active:bg-secondary-100 transition-colors"
                     >
-                      Edit
+                      {editingDestination?.id === destination.id ? 'Editing' : 'Edit'}
                     </button>
                     <button
                       onClick={() => handleDeleteDestination(destination.id)}
@@ -3962,12 +4120,114 @@ export default function AdminDashboard() {
                       Delete
                     </button>
                   </div>
+                  {editingDestination?.id === destination.id && (
+                    <div className="mt-4 rounded-xl border border-secondary-200 bg-secondary-50/40 p-3">
+                      <p className="mb-3 text-sm font-bold text-gray-900">Editing this destination</p>
+                      {renderDestinationEditForm(true)}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           </>
         )}
       </div>
+
+      {showDestinationFareModal && selectedDestinationForFares && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 p-4">
+          <div className={`w-full max-w-2xl max-h-[76dvh] overflow-hidden rounded-[24px] border shadow-2xl flex flex-col ${
+            darkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'
+          }`}>
+              <div className={`border-b px-6 py-4 ${
+                darkMode
+                  ? 'border-slate-700 bg-slate-950'
+                  : 'border-gray-200 bg-[linear-gradient(135deg,#f8fbff_0%,#eef6ff_100%)]'
+              }`}>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <h3 className={`text-lg font-bold truncate ${darkMode ? 'text-white' : 'text-gray-900'}`}>Assign Fixed Fares - {selectedDestinationForFares.name}</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeDestinationFareModal}
+                    className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors ${
+                      darkMode
+                        ? 'border-slate-600 bg-slate-800 text-slate-100 hover:bg-slate-700 hover:text-white'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-800'
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+
+              <div className={`flex min-h-0 flex-1 flex-col overflow-hidden p-6 ${darkMode ? 'bg-slate-900' : 'bg-white'}`}>
+                {loadingDestinationFares ? (
+                  <p className={`text-sm ${darkMode ? 'text-slate-300' : 'text-gray-600'}`}>Loading current fares...</p>
+                ) : activeCarModels.length === 0 ? (
+                  <p className={`text-sm ${darkMode ? 'text-slate-300' : 'text-gray-600'}`}>No active car models found. Add and activate cars first.</p>
+                ) : (
+                  <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-2 scrollbar-thin-modern">
+                    {activeCarModels.map((modelName) => (
+                      <div key={modelName} className={`grid grid-cols-1 gap-3 rounded-xl border p-4 sm:grid-cols-[1fr_160px] sm:items-center ${
+                        darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-100 bg-gray-50/60'
+                      }`}>
+                        <div>
+                          <p className={`text-sm font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{modelName}</p>
+                        </div>
+                        <div className={`rounded-xl border px-3 py-1.5 focus-within:border-secondary-400 transition-colors shadow-sm ${
+                          darkMode ? 'border-slate-600 bg-slate-950' : 'border-gray-200 bg-white'
+                        }`}>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-xs font-bold ${darkMode ? 'text-slate-300' : 'text-gray-400'}`}>&#8377;</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            placeholder="e.g. 3500"
+                            className={`w-full bg-transparent text-sm font-bold focus:outline-none ${
+                              darkMode ? 'text-white placeholder:text-slate-400' : 'text-gray-900 placeholder:text-gray-400'
+                            }`}
+                            value={destinationFaresDraft[modelName] || ''}
+                            onChange={(e) =>
+                              setDestinationFaresDraft((prev) => ({
+                                ...prev,
+                                [modelName]: e.target.value,
+                              }))
+                            }
+                          />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className={`flex items-center justify-end gap-3 border-t p-6 ${
+                darkMode ? 'border-slate-700 bg-slate-950' : 'border-gray-100 bg-gray-50/30'
+              }`}>
+                <button
+                  type="button"
+                  onClick={closeDestinationFareModal}
+                  className={`rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+                    darkMode ? 'text-slate-300 hover:text-white' : 'text-gray-500 hover:text-gray-950'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveDestinationFares}
+                  disabled={savingDestinationFares}
+                  className="rounded-xl bg-secondary-500 px-8 py-2.5 text-sm font-black text-primary-950 shadow-lg shadow-secondary-500/20 transition-all hover:bg-secondary-400 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60 disabled:hover:scale-100"
+                >
+                  {savingDestinationFares ? 'Saving...' : 'Save Fares'}
+                </button>
+              </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 
@@ -4462,7 +4722,7 @@ export default function AdminDashboard() {
       ? (assignedActiveBookings / activeBookingsForOps.length) * 100
       : 0
 
-    const bookingTypeStats = (['airport', 'tour', 'hourly'] as const).map((type) => {
+    const bookingTypeStats = (['taxi', 'tour'] as const).map((type) => {
       const typeBookings = bookings.filter((b) => b.booking_type === type)
       const typeRevenue = typeBookings.reduce((sum, b) => sum + toNum(b.amount_total), 0)
       return { type, count: typeBookings.length, revenue: typeRevenue }
@@ -4478,7 +4738,7 @@ export default function AdminDashboard() {
       .sort((a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime())
       .slice(0, 8)
 
-    const hourlyDemand = Array.from({ length: 24 }, (_, hour) => {
+    const bookingDemandByHour = Array.from({ length: 24 }, (_, hour) => {
       const count = bookings.filter((b) => {
         if (!b.start_datetime) return false
         const d = new Date(b.start_datetime)
@@ -4488,7 +4748,7 @@ export default function AdminDashboard() {
       return { hour, count }
     }).sort((a, b) => b.count - a.count)
 
-    const topDemandHours = hourlyDemand.slice(0, 5)
+    const topDemandHours = bookingDemandByHour.slice(0, 5)
 
     return {
       totalRevenue,

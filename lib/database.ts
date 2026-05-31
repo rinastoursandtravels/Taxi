@@ -46,11 +46,6 @@ export async function calculateTaxiFare(destinationId: string, carType: string) 
   return { data, error }
 }
 
-export async function getHourlyRates() {
-  const { data, error } = await supabase.from('hourly_rates').select('*')
-  return { data, error }
-}
-
 // ==================== TOUR PACKAGES ====================
 export async function getTourPackages() {
   const { data, error } = await supabase

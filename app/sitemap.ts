@@ -53,12 +53,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'monthly',
       priority: 0.85,
     },
-    {
-      url: `${SITE_URL}/hourly-taxi-itanagar`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.85,
-    },
     // Support pages
     {
       url: `${SITE_URL}/faq`,

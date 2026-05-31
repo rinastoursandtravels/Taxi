@@ -215,7 +215,6 @@ export default function ArunachalToursPage() {
                   { href: '/itanagar-tours', label: 'Itanagar Tours' },
                   { href: '/hollongi-airport-taxi', label: 'Hollongi Airport Taxi' },
                   { href: '/donyi-polo-airport-taxi', label: 'Donyi Polo Airport Taxi' },
-                  { href: '/hourly-taxi-itanagar', label: 'Hourly Taxi Itanagar' },
                 ].map(({ href, label }) => (
                   <Link key={href} href={href} className="px-4 py-2 rounded-xl border border-primary-700 text-gray-400 hover:border-secondary-500/40 hover:text-secondary-400 transition-colors text-sm">
                     {label}

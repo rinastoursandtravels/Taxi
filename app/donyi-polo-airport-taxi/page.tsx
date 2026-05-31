@@ -154,7 +154,6 @@ export default function DonyiPoloAirportTaxiPage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-4xl mx-auto">
                 {[
                   { Icon: Car, title: 'Airport Taxi', desc: 'Pre-book cab from Donyi Polo Airport to your destination. Fixed price, driver confirmed.', link: '/book-taxi', cta: 'Book Taxi' },
-                  { Icon: Clock, title: 'Hourly Rental', desc: 'Need a cab for the day? Book hourly for flexible sightseeing and multiple stops.', link: '/book-taxi', cta: 'Book Hourly' },
                   { Icon: MapPin, title: 'Arunachal Tours', desc: 'Arrive at HGI and head straight into your Arunachal adventure with a curated tour.', link: '/tours', cta: 'View Tours' },
                 ].map(({ Icon, title, desc, link, cta }) => (
                   <div key={title} className="p-6 rounded-2xl bg-primary-900/40 border border-primary-800 hover:border-secondary-500/30 hover:bg-primary-900/70 transition-all duration-300 flex flex-col">
@@ -215,7 +214,6 @@ export default function DonyiPoloAirportTaxiPage() {
                 {[
                   { href: '/hollongi-airport-taxi', label: 'Hollongi Airport Taxi' },
                   { href: '/itanagar-airport-taxi', label: 'Itanagar Airport Taxi' },
-                  { href: '/hourly-taxi-itanagar', label: 'Hourly Taxi Itanagar' },
                   { href: '/arunachal-tours', label: 'Arunachal Tours' },
                 ].map(({ href, label }) => (
                   <Link key={href} href={href} className="px-4 py-2 rounded-xl border border-primary-700 text-gray-400 hover:border-secondary-500/40 hover:text-secondary-400 transition-colors text-sm">

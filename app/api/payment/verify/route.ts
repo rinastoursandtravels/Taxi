@@ -139,7 +139,7 @@ export async function POST(request: Request) {
       ? new Date(booking.start_datetime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
       : '')
     const carType = body.carType || booking.car_model || 'Economy'
-    const resolvedBookingType = bookingType || booking.booking_type || 'airport'
+    const resolvedBookingType = bookingType || booking.booking_type || 'taxi'
 
     // Resolve destination / tour name
     let destinationName = body.destination || body.tourPackageName || ''

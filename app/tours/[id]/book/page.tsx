@@ -220,7 +220,6 @@ export default function BookTour() {
         start_time: startTime,
         destination_id: null,
         tour_package_id: tour.id,
-        no_of_hours: null,
         car_model: tour.car_model || null,
         amount_total: totalPrice,
         booking_status: 'pending',

@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: "%s | Rina's Tours and Travels",
   },
   description:
-    "Book airport taxi from Donyi Polo Airport (Hollongi), Itanagar. Pre-book airport cab, hourly taxi, and curated Arunachal Pradesh tour packages. Verified drivers, transparent pricing.",
+    "Book airport taxi from Donyi Polo Airport (Hollongi), Itanagar. Pre-book airport cab and curated Arunachal Pradesh tour packages. Verified drivers, transparent pricing.",
   keywords: [
     'hollongi airport taxi',
     'donyi polo airport taxi',
@@ -34,8 +34,6 @@ export const metadata: Metadata = {
     'arunachal travel booking',
     'travel agency itanagar',
     'tour booking arunachal pradesh',
-    'hourly taxi itanagar',
-    'hourly cab booking itanagar',
     "rina's tours and travels",
     'rina tours itanagar',
     'taxi booking hollongi',
@@ -62,7 +60,7 @@ export const metadata: Metadata = {
     siteName: "Rina's Tours and Travels",
     title: "Rina's Tours and Travels | Hollongi Airport Taxi & Arunachal Tours",
     description:
-      "Book airport taxi from Donyi Polo Airport (Hollongi), Itanagar. Hourly taxi rentals and curated Arunachal Pradesh tour packages. Verified drivers, transparent pricing.",
+      "Book airport taxi from Donyi Polo Airport (Hollongi), Itanagar and curated Arunachal Pradesh tour packages. Verified drivers, transparent pricing.",
     images: [
       {
         url: '/og-image.jpg',
@@ -96,7 +94,7 @@ const organizationSchema = {
       url: SITE_URL,
       email: 'support@rinastoursandtravels.in',
       description:
-        "Airport taxi service and tour booking platform at Donyi Polo Airport (Hollongi), serving Itanagar and all of Arunachal Pradesh. Pre-book cabs, hourly taxis, and tour packages.",
+        "Airport taxi service and tour booking platform at Donyi Polo Airport (Hollongi), serving Itanagar and all of Arunachal Pradesh. Pre-book cabs and tour packages.",
       address: {
         '@type': 'PostalAddress',
         streetAddress: 'Hollongi',
@@ -128,15 +126,6 @@ const organizationSchema = {
               name: 'Airport Taxi from Donyi Polo Airport',
               description:
                 'Pre-book taxi from Donyi Polo Airport (Hollongi) to any destination in Arunachal Pradesh.',
-            },
-          },
-          {
-            '@type': 'Offer',
-            itemOffered: {
-              '@type': 'Service',
-              name: 'Hourly Taxi Rental Itanagar',
-              description:
-                'Rent a taxi by the hour for local sightseeing and city travel in Itanagar.',
             },
           },
           {

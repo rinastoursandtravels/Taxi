@@ -1,71 +1,69 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef, memo } from 'react'
+import { useState, useEffect, useMemo, useRef, memo, Fragment } from 'react'
 import Header from '@/components/Header'
-import Footer from '@/components/Footer'
-import { MapPin, Users, Car, Clock, Search, X } from 'lucide-react'
+import { Users, Search, X, MapPin, Calendar, Clock, Car, User, Mail, Phone, Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import PhoneInput from '@/components/PhoneInput'
 import AuthGate from '@/components/AuthGate'
 import toast from 'react-hot-toast'
+import dayjs, { Dayjs } from 'dayjs'
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider'
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs'
+import { DateCalendar } from '@mui/x-date-pickers/DateCalendar'
+import { TimeClock } from '@mui/x-date-pickers/TimeClock'
 import { generateBookingId } from '@/lib/utils'
 import { validateFullName, validatePhoneNumber, validateEmail } from '@/lib/validation'
 import { useAuth } from '@/context/AuthContext'
 
-// ── Types ──────────────────────────────────────────────────────────────────
 type Destination = {
   id: string
   name: string
-  distance_km: number
   estimated_duration_minutes: number
   description: string | null
+}
+
+type CarModel = {
+  model_name: string
+  class: string
+  capacity: number
+  fixed_fare: number
+}
+
+type AirportStep = 'route' | 'schedule' | 'car' | 'contact' | 'confirm'
+const AIRPORT_STEPS: AirportStep[] = ['route', 'schedule', 'car', 'contact', 'confirm']
+const STEP_META: Record<AirportStep, { label: string; caption: string }> = {
+  route: { label: 'Route', caption: 'Choose destination' },
+  schedule: { label: 'Schedule', caption: 'Set pickup slot' },
+  car: { label: 'Car', caption: 'Pick a model' },
+  contact: { label: 'Contact', caption: 'Confirm details' },
+  confirm: { label: 'Review', caption: 'Proceed to pay' },
 }
 
 function formatDurationMinutes(minutes: number): string {
   if (minutes < 60) return `${minutes} min${minutes !== 1 ? 's' : ''}`
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
-  const hStr = `${h} hr${h !== 1 ? 's' : ''}`
-  return m === 0 ? hStr : `${hStr} ${m} mins`
+  return m === 0 ? `${h} hr${h !== 1 ? 's' : ''}` : `${h} hr${h !== 1 ? 's' : ''} ${m} mins`
 }
 
-// Represents a car model (not a specific car)
-// Users see only the model name and basic info, not the number plate or specific car details
-type CarModel = {
-  model_name: string
-  class: string
-  capacity: number
-  per_km_charge: number
-  per_hr_charge: number
-  available_count: number // Number of cars of this model available
+function formatCurrency(amount: number): string {
+  return `Rs. ${Number(amount || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`
 }
 
-type BookingMode = 'airport' | 'hourly'
-
-// Airport flow steps (optimized: combined related fields)
-type AirportStep = 'route' | 'schedule' | 'car' | 'contact' | 'confirm'
-// Hourly flow steps (optimized: combined related fields)
-type HourlyStep = 'details' | 'schedule' | 'car' | 'contact' | 'confirm'
-
-const AIRPORT_STEPS: AirportStep[] = ['route', 'schedule', 'car', 'contact', 'confirm']
-const AIRPORT_LABELS: Record<AirportStep, string> = {
-  route: 'Route', schedule: 'Date & Time', car: 'Car', contact: 'Contact', confirm: 'Confirm',
-}
-
-const HOURLY_STEPS: HourlyStep[] = ['details', 'schedule', 'car', 'contact', 'confirm']
-const HOURLY_LABELS: Record<HourlyStep, string> = {
-  details: 'Passengers & Date', schedule: 'Time & Duration', car: 'Car', contact: 'Contact', confirm: 'Confirm',
-}
-
-function formatDuration(totalHours: number): string {
-  const d = Math.floor(totalHours / 24)
-  const h = totalHours % 24
-  if (d > 0 && h > 0) return `${d}d ${h}h`
-  if (d > 0) return `${d}d`
-  return `${h}h`
-}
-
-// ── Separate Contact Step Component (memoized to prevent re-creation) ──────
-interface ContactStepProps {
+const ContactStep = memo(function ContactStep({
+  name,
+  phone,
+  email,
+  nameInputRef,
+  phoneInputRef,
+  emailInputRef,
+  onNameChange,
+  onPhoneChange,
+  onEmailChange,
+}: {
   name: string
   phone: string
   email: string
@@ -75,77 +73,71 @@ interface ContactStepProps {
   onNameChange: (value: string) => void
   onPhoneChange: (value: string) => void
   onEmailChange: (value: string) => void
-  isEmailLocked?: boolean
-}
-
-const ContactStepComponent = memo(({
-  name, phone, email,
-  nameInputRef, phoneInputRef, emailInputRef,
-  onNameChange, onPhoneChange, onEmailChange,
-  isEmailLocked = false
-}: ContactStepProps) => (
-  <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 text-gray-100">
-    <h2 className="text-xl font-black text-white mb-3">Contact Details</h2>
-    <div className="space-y-2.5">
+}) {
+  return (
+    <div className="space-y-4">
       <div>
-        <label className="block text-sm font-semibold text-gray-300 mb-1">Full Name *</label>
-        <input
-          ref={nameInputRef}
-          type="text"
-          value={name}
-          onChange={(e) => onNameChange(e.target.value)}
-          placeholder="Enter your full name"
-          className="input-field !bg-primary-950/70 !border-primary-700 !text-white placeholder:!text-gray-500 focus:!border-secondary-500"
-          required
+        <label className="flex items-center gap-2 text-sm font-semibold text-white mb-2">
+          <User className="h-4 w-4 text-secondary-300" />
+          Full Name *
+        </label>
+        <input 
+          ref={nameInputRef} 
+          type="text" 
+          value={name} 
+          onChange={(e) => onNameChange(e.target.value)} 
+          placeholder="John Doe"
+          className="w-full rounded-xl border border-white/15 bg-white/[0.05] px-4 py-3 text-white placeholder:text-gray-500 focus:border-secondary-400 focus:bg-white/[0.08] focus:outline-none transition-colors" 
+          required 
         />
       </div>
       <div>
-        <label className="block text-sm font-semibold text-gray-300 mb-1">Phone Number *</label>
-        <PhoneInput
-          ref={phoneInputRef}
-          value={phone}
+        <label className="flex items-center gap-2 text-sm font-semibold text-white mb-2">
+          <Phone className="h-4 w-4 text-secondary-300" />
+          Phone Number *
+        </label>
+        <PhoneInput 
+          ref={phoneInputRef} 
+          value={phone} 
           onChange={onPhoneChange}
         />
       </div>
       <div>
-        <label className="block text-sm font-semibold text-gray-300 mb-1">Email *</label>
-        <input
-          ref={emailInputRef}
-          type="email"
-          value={email}
-          onChange={(e) => !isEmailLocked && onEmailChange(e.target.value)}
-          placeholder="your@email.com"
-          className="input-field !bg-primary-950/70 !border-primary-700 !text-white placeholder:!text-gray-500 focus:!border-secondary-500 disabled:!bg-primary-900 disabled:cursor-not-allowed"
-          disabled={isEmailLocked}
-          required
+        <label className="flex items-center gap-2 text-sm font-semibold text-white mb-2">
+          <Mail className="h-4 w-4 text-secondary-300" />
+          Email *
+        </label>
+        <input 
+          ref={emailInputRef} 
+          type="email" 
+          value={email} 
+          onChange={(e) => onEmailChange(e.target.value)} 
+          placeholder="john@example.com"
+          className="w-full rounded-xl border border-white/15 bg-white/[0.05] px-4 py-3 text-white placeholder:text-gray-500 cursor-not-allowed opacity-70 focus:outline-none" 
+          disabled 
+          required 
         />
       </div>
     </div>
-  </div>
-))
+  )
+})
 
-ContactStepComponent.displayName = 'ContactStep'
-
-// ── Main Book Taxi Component ───────────────────────────────────────────────
 export default function BookTaxi() {
   const { user, isLoading } = useAuth()
-
-  const [mode, setMode] = useState<BookingMode>('airport')
-  const [airportStep, setAirportStep] = useState<AirportStep>('route')
-  const [hourlyStep, setHourlyStep] = useState<HourlyStep>('details')
-
+  const [step, setStep] = useState<AirportStep>('route')
   const [destinations, setDestinations] = useState<Destination[]>([])
+  const [selectedDest, setSelectedDest] = useState<Destination | null>(null)
   const [loadingDest, setLoadingDest] = useState(true)
-  const [destinationSearch, setDestinationSearch] = useState('')
   const [availableCarModels, setAvailableCarModels] = useState<CarModel[]>([])
   const [loadingCars, setLoadingCars] = useState(false)
-  const [carSearch, setCarSearch] = useState('')
-  const [carClassFilter, setCarClassFilter] = useState('')
-  const [carSort, setCarSort] = useState<'price-asc' | 'price-desc' | 'capacity-asc' | 'capacity-desc' | ''>('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showAuthGate, setShowAuthGate] = useState(false)
+  const [showDatePicker, setShowDatePicker] = useState(false)
+  const [showTimePicker, setShowTimePicker] = useState(false)
 
-  // Shared form fields
+  const [destinationSearch, setDestinationSearch] = useState('')
+  const [destinationSortOrder, setDestinationSortOrder] = useState<'default' | 'asc' | 'desc'>('default')
+  const [carSearch, setCarSearch] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -154,100 +146,10 @@ export default function BookTaxi() {
   const [startTime, setStartTime] = useState('')
   const [selectedCarModel, setSelectedCarModel] = useState<CarModel | null>(null)
 
-  // Airport-only
-  const [destinationId, setDestinationId] = useState('')
-  const [selectedDest, setSelectedDest] = useState<Destination | null>(null)
-
-  // Hourly-only
-  const [durationDays, setDurationDays] = useState(0)
-  const [durationHrs, setDurationHrs] = useState(2)
-  const noOfHours = durationDays * 24 + durationHrs
-
-  // ── Refs for focus management ─────────────────────────────────────────────
   const nameInputRef = useRef<HTMLInputElement>(null)
   const phoneInputRef = useRef<HTMLInputElement>(null)
   const emailInputRef = useRef<HTMLInputElement>(null)
 
-  // ── Restore form state after login redirect ──────────────────────────────
-  useEffect(() => {
-    if (isLoading) return
-    const saved = sessionStorage.getItem('bookingResume')
-    if (!saved) return
-    // Resume applies only after a Google OAuth round-trip. If the user isn't
-    // signed in (OAuth abandoned), discard the snapshot instead of jumping
-    // ahead to the contact step.
-    if (!user) { sessionStorage.removeItem('bookingResume'); return }
-    try {
-      const s = JSON.parse(saved)
-      sessionStorage.removeItem('bookingResume')
-      if (s.mode) setMode(s.mode)
-      if (s.name) setName(s.name)
-      if (s.phone) setPhone(s.phone)
-      if (s.passengers) setPassengers(s.passengers)
-      if (s.date) setDate(s.date)
-      if (s.startTime) setStartTime(s.startTime)
-      if (s.destinationId) setDestinationId(s.destinationId)
-      if (s.selectedDest) setSelectedDest(s.selectedDest)
-      if (s.durationDays !== undefined) setDurationDays(s.durationDays)
-      if (s.durationHrs !== undefined) setDurationHrs(s.durationHrs)
-      if (s.selectedCarModel) setSelectedCarModel(s.selectedCarModel)
-      if (s.availableCarModels) setAvailableCarModels(s.availableCarModels)
-      if (s.mode === 'airport') setAirportStep('contact')
-      if (s.mode === 'hourly') setHourlyStep('contact')
-    } catch {
-      sessionStorage.removeItem('bookingResume')
-    }
-  }, [isLoading, user])
-
-  // ── Advance past the inline auth gate once the user is signed in ──────────
-  // Email/password auth never navigates, so this fires in-place. Google OAuth
-  // returns via a full reload and is handled by the resume effect above.
-  useEffect(() => {
-    if (!user || !showAuthGate) return
-    setShowAuthGate(false)
-    if (mode === 'airport') setAirportStep('contact')
-    else setHourlyStep('contact')
-  }, [user, showAuthGate, mode])
-
-  // Persist booking state before a Google OAuth redirect — OAuth needs a
-  // full-page redirect, and the booking page resumes from this on return.
-  const persistForOAuth = () => {
-    const payload = mode === 'airport'
-      ? { mode: 'airport', name, phone, passengers, date, startTime,
-          destinationId, selectedDest, selectedCarModel, availableCarModels }
-      : { mode: 'hourly', name, phone, passengers, date, startTime,
-          durationDays, durationHrs, selectedCarModel, availableCarModels }
-    sessionStorage.setItem('bookingResume', JSON.stringify(payload))
-    sessionStorage.setItem('postAuthRedirect', '/book-taxi')
-  }
-
-  // ── Auto-populate contact fields from user account ───────────────────────
-  useEffect(() => {
-    if (user?.email) setEmail(user.email || '')
-  }, [user])
-
-  // Ensure this page can always scroll even if another screen previously
-  // locked document overflow for custom transitions.
-  useEffect(() => {
-    document.documentElement.style.overflowY = 'auto'
-    document.body.style.overflowY = 'auto'
-    document.documentElement.style.overflowX = 'hidden'
-    document.body.style.overflowX = 'hidden'
-
-    return () => {
-      document.documentElement.style.overflow = ''
-      document.body.style.overflow = ''
-    }
-  }, [])
-
-  // ── Focus management for contact step ────────────────────────────────────
-  useEffect(() => {
-    if (airportStep === 'contact' || hourlyStep === 'contact') {
-      nameInputRef.current?.focus()
-    }
-  }, [airportStep, hourlyStep])
-
-  // ── Data loading ─────────────────────────────────────────────────────────
   useEffect(() => {
     fetch('/api/destinations')
       .then((r) => r.json())
@@ -256,1011 +158,877 @@ export default function BookTaxi() {
       .finally(() => setLoadingDest(false))
   }, [])
 
+  useEffect(() => {
+    if (user?.email) setEmail(user.email || '')
+  }, [user])
+
+  useEffect(() => {
+    if (step === 'contact') nameInputRef.current?.focus()
+  }, [step])
+
+  useEffect(() => {
+    if (!user || !showAuthGate) return
+    setShowAuthGate(false)
+    setStep('contact')
+  }, [user, showAuthGate])
+
+  const persistForOAuth = () => {
+    sessionStorage.setItem(
+      'bookingResume',
+      JSON.stringify({ name, phone, passengers, date, startTime, selectedDest, selectedCarModel, availableCarModels })
+    )
+    sessionStorage.setItem('postAuthRedirect', '/book-taxi')
+  }
+
+  useEffect(() => {
+    if (isLoading) return
+    const saved = sessionStorage.getItem('bookingResume')
+    if (!saved || !user) return
+    try {
+      const s = JSON.parse(saved)
+      sessionStorage.removeItem('bookingResume')
+      if (s.name) setName(s.name)
+      if (s.phone) setPhone(s.phone)
+      if (s.passengers) setPassengers(s.passengers)
+      if (s.date) setDate(s.date)
+      if (s.startTime) setStartTime(s.startTime)
+      if (s.selectedDest) setSelectedDest(s.selectedDest)
+      if (s.selectedCarModel) setSelectedCarModel(s.selectedCarModel)
+      if (s.availableCarModels) setAvailableCarModels(s.availableCarModels)
+      setStep('contact')
+    } catch {
+      sessionStorage.removeItem('bookingResume')
+    }
+  }, [isLoading, user])
+
+  const filteredDestinations = useMemo(() => {
+    const q = destinationSearch.trim().toLowerCase()
+    const filtered = q
+      ? destinations.filter((d) => d.name.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q))
+      : destinations
+
+    if (destinationSortOrder === 'asc') {
+      return [...filtered].sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }))
+    }
+    if (destinationSortOrder === 'desc') {
+      return [...filtered].sort((a, b) => b.name.localeCompare(a.name, 'en', { sensitivity: 'base' }))
+    }
+    return filtered
+  }, [destinations, destinationSearch, destinationSortOrder])
+
+  const filteredCars = useMemo(() => {
+    if (!carSearch.trim()) return availableCarModels
+    const q = carSearch.toLowerCase()
+    return availableCarModels.filter((c) => c.model_name.toLowerCase().includes(q) || c.class.toLowerCase().includes(q))
+  }, [availableCarModels, carSearch])
+
+  const currentStepIndex = AIRPORT_STEPS.indexOf(step)
+  const totalCost = selectedCarModel ? Number(selectedCarModel.fixed_fare || 0) : 0
+  const advance = Math.round(totalCost * 0.3 * 100) / 100
+  const remaining = Math.round(totalCost * 0.7 * 100) / 100
+
   const loadCars = async () => {
+    if (!selectedDest) return
     setLoadingCars(true)
     try {
-      // Compute end datetime without % 24 wrapping.
-      // Returns the actual end date string (may be a future day) and HH:mm.
-      const addMinsToDateTime = (dateStr: string, timeStr: string, addMins: number) => {
-        const [y, mo, d] = dateStr.split('-').map(Number)
-        const [h, m] = timeStr.split(':').map(Number)
-        const totalMins = h * 60 + m + addMins
-        const extraDays = Math.floor(totalMins / 1440)       // 1440 = 24*60
-        const remainMins = totalMins % 1440
-        const endH = Math.floor(remainMins / 60)
-        const endM = remainMins % 60
-        // Add extraDays using local date parts to avoid UTC shift on .toISOString()
-        const dt = new Date(y, mo - 1, d + extraDays)
-        const endDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
-        const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
-        return { endDate, endTime }
-      }
-
-      let endDate = date
-      let estimatedEndTime = startTime
-
-      if (mode === 'airport' && selectedDest) {
-        // Double duration: trip to destination + return to base
-        const result = addMinsToDateTime(date, startTime, selectedDest.estimated_duration_minutes * 2)
-        endDate = result.endDate
-        estimatedEndTime = result.endTime
-      } else if (mode === 'hourly') {
-        const result = addMinsToDateTime(date, startTime, noOfHours * 60)
-        endDate = result.endDate
-        estimatedEndTime = result.endTime
-      }
-
+      const [h, m] = startTime.split(':').map(Number)
+      const totalMinutes = h * 60 + m + selectedDest.estimated_duration_minutes * 2
+      const dayOffset = Math.floor(totalMinutes / 1440)
+      const normalizedMinutes = totalMinutes % 1440
+      const endTime = `${String(Math.floor(normalizedMinutes / 60)).padStart(2, '0')}:${String(normalizedMinutes % 60).padStart(2, '0')}`
+      const baseDate = new Date(`${date}T00:00:00`)
+      baseDate.setDate(baseDate.getDate() + dayOffset)
+      const endDate = `${baseDate.getFullYear()}-${String(baseDate.getMonth() + 1).padStart(2, '0')}-${String(baseDate.getDate()).padStart(2, '0')}`
       const params = new URLSearchParams({
+        destination_id: selectedDest.id,
         booking_date: date,
         start_time: startTime,
-        end_time: estimatedEndTime,
+        end_time: endTime,
+        end_date: endDate,
       })
-      // Pass end_date only when the booking crosses into a different calendar day
-      if (endDate !== date) params.set('end_date', endDate)
-
       const r = await fetch(`/api/cars/available-models?${params}`)
       const d = await r.json()
-      
       if (d.success) {
-        // Filter by passenger capacity
         const count = parseInt(passengers)
-        const filtered = (d.models || []).filter((m: CarModel) => m.capacity >= count)
-        setAvailableCarModels(filtered)
-        
-        if (filtered.length === 0) {
-          toast.error(`No cars available for ${passengers} passenger(s) in the selected timeslot. Try reducing the count or changing the time.`)
-        }
+        setAvailableCarModels((d.models || []).filter((c: CarModel) => c.capacity >= count))
       } else {
         toast.error(d.error || 'Failed to load available cars')
       }
-    } catch (error) {
-      console.error('Error loading cars:', error)
+    } catch {
       toast.error('Failed to load available cars')
     } finally {
       setLoadingCars(false)
     }
   }
 
-  // ── Reset when switching modes ────────────────────────────────────────────
-  const switchMode = (m: BookingMode) => {
-    if (m === mode) return
-    setMode(m)
-    setAirportStep('route')
-    setHourlyStep('details')
-    setSelectedCarModel(null)
-    setDestinationId('')
-    setSelectedDest(null)
-    setDestinationSearch('')
-    setDurationDays(0)
-    setDurationHrs(2)
-    setAvailableCarModels([])
-    setCarSearch('')
-    setCarClassFilter('')
-    setCarSort('')
-  }
-
-  // ── Cost calculators ──────────────────────────────────────────────────────
-  const airportTotal = selectedDest && selectedCarModel
-    ? selectedDest.distance_km * selectedCarModel.per_km_charge
-    : 0
-
-  const hourlyTotal = selectedCarModel
-    ? noOfHours * selectedCarModel.per_hr_charge
-    : 0
-
-  const totalCost = mode === 'airport' ? airportTotal : hourlyTotal
-
-  // ── Filtered destinations based on search ─────────────────────────────────
-  const filteredDestinations = useMemo(() => {
-    if (!destinationSearch.trim()) return destinations
-    const search = destinationSearch.toLowerCase()
-    return destinations.filter((dest) =>
-      dest.name.toLowerCase().includes(search) ||
-      dest.description?.toLowerCase().includes(search)
-    )
-  }, [destinations, destinationSearch])
-
-  // ── Filtered + sorted car models ──────────────────────────────────────────
-  const filteredCarModels = useMemo(() => {
-    let result = availableCarModels
-    if (carClassFilter) result = result.filter((m) => m.class === carClassFilter)
-    if (carSearch.trim()) {
-      const s = carSearch.toLowerCase()
-      result = result.filter((m) => m.model_name.toLowerCase().includes(s) || m.class.toLowerCase().includes(s))
-    }
-    if (carSort) {
-      result = [...result].sort((a, b) => {
-        const priceA = mode === 'airport' && selectedDest ? selectedDest.distance_km * a.per_km_charge : noOfHours * a.per_hr_charge
-        const priceB = mode === 'airport' && selectedDest ? selectedDest.distance_km * b.per_km_charge : noOfHours * b.per_hr_charge
-        if (carSort === 'price-asc') return priceA - priceB
-        if (carSort === 'price-desc') return priceB - priceA
-        if (carSort === 'capacity-asc') return a.capacity - b.capacity
-        if (carSort === 'capacity-desc') return b.capacity - a.capacity
-        return 0
-      })
-    }
-    return result
-  }, [availableCarModels, carSearch, carClassFilter, carSort, mode, selectedDest, noOfHours])
-
-  const carClasses = useMemo(
-    () => Array.from(new Set(availableCarModels.map((m) => m.class))).sort(),
-    [availableCarModels]
-  )
-
-  // ── Airport step navigation ───────────────────────────────────────────────
-  const handleAirportNext = (e: React.FormEvent) => {
+  const onNext = (e: React.FormEvent) => {
     e.preventDefault()
-    const idx = AIRPORT_STEPS.indexOf(airportStep)
-
-    if (airportStep === 'route') {
-      if (!destinationId || !passengers) { toast.error('Please select destination and passengers'); return }
+    const idx = AIRPORT_STEPS.indexOf(step)
+    if (step === 'route' && (!selectedDest || !passengers)) return toast.error('Please select destination and passengers')
+    if (step === 'schedule') {
+      if (!date || !startTime) return toast.error('Please select date and time')
+      void loadCars()
     }
-    if (airportStep === 'schedule') {
-      if (!date || !startTime) { toast.error('Please select date and time'); return }
-      loadCars()
+    if (step === 'car') {
+      if (!selectedCarModel) return toast.error('Please select a car model')
+      if (!user) return setShowAuthGate(true)
     }
-    if (airportStep === 'car') {
-      if (!selectedCarModel) { toast.error('Please select a car model'); return }
-      if (!user) {
-        // Auth happens inline via a modal — no navigation, booking state stays put.
-        setShowAuthGate(true)
-        return
-      }
+    if (step === 'contact') {
+      if (!validateFullName(name).valid) return toast.error('Invalid name')
+      if (!validatePhoneNumber(phone).valid) return toast.error('Invalid phone')
+      if (!validateEmail(email).valid) return toast.error('Invalid email')
     }
-    if (airportStep === 'contact') {
-      const nameValidation = validateFullName(name)
-      if (!nameValidation.valid) { toast.error(nameValidation.error || 'Invalid name'); return }
-      const phoneValidation = validatePhoneNumber(phone)
-      if (!phoneValidation.valid) { toast.error(phoneValidation.error || 'Invalid phone number'); return }
-      const emailValidation = validateEmail(email)
-      if (!emailValidation.valid) { toast.error(emailValidation.error || 'Invalid email'); return }
-    }
-
-    setAirportStep(AIRPORT_STEPS[idx + 1])
+    setStep(AIRPORT_STEPS[idx + 1])
   }
 
-  const handleAirportPrev = () => {
-    const idx = AIRPORT_STEPS.indexOf(airportStep)
-    if (idx > 0) setAirportStep(AIRPORT_STEPS[idx - 1])
-  }
-
-  // ── Hourly step navigation ────────────────────────────────────────────────
-  const handleHourlyNext = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const idx = HOURLY_STEPS.indexOf(hourlyStep)
-
-    if (hourlyStep === 'details') {
-      if (!passengers || !date) { toast.error('Please select passengers and date'); return }
-    }
-    if (hourlyStep === 'schedule') {
-      if (!startTime) { toast.error('Please select pickup time'); return }
-      loadCars()
-    }
-    if (hourlyStep === 'car') {
-      if (!selectedCarModel) { toast.error('Please select a car model'); return }
-      if (!user) {
-        // Auth happens inline via a modal — no navigation, booking state stays put.
-        setShowAuthGate(true)
-        return
-      }
-    }
-    if (hourlyStep === 'contact') {
-      const nameValidation = validateFullName(name)
-      if (!nameValidation.valid) { toast.error(nameValidation.error || 'Invalid name'); return }
-      const phoneValidation = validatePhoneNumber(phone)
-      if (!phoneValidation.valid) { toast.error(phoneValidation.error || 'Invalid phone number'); return }
-      const emailValidation = validateEmail(email)
-      if (!emailValidation.valid) { toast.error(emailValidation.error || 'Invalid email'); return }
-    }
-
-    setHourlyStep(HOURLY_STEPS[idx + 1])
-  }
-
-  const handleHourlyPrev = () => {
-    const idx = HOURLY_STEPS.indexOf(hourlyStep)
-    if (idx > 0) setHourlyStep(HOURLY_STEPS[idx - 1])
-  }
-
-  // ── Booking submission ────────────────────────────────────────────────────
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (isSubmitting) return
-    if (!selectedCarModel) { toast.error('Missing car model selection'); return }
-
+    if (!selectedDest || !selectedCarModel || isSubmitting) return
     setIsSubmitting(true)
-
-    const cost = mode === 'airport' ? airportTotal : hourlyTotal
-    const advance = Math.round(cost * 0.3 * 100) / 100
     const bookingId = generateBookingId()
 
+    const payload = {
+      booking_id: bookingId,
+      booking_type: 'taxi',
+      user_name: name,
+      user_email: email,
+      phone,
+      passenger_count: parseInt(passengers),
+      booking_date: date,
+      start_time: startTime,
+      destination_id: selectedDest.id,
+      car_model: selectedCarModel.model_name,
+      amount_total: totalCost,
+      booking_status: 'pending',
+    }
+
     try {
-      const payload =
-        mode === 'airport'
-          ? {
-              booking_id: bookingId,
-              booking_type: 'airport',
-              user_name: name,
-              user_email: email,
-              phone,
-              passenger_count: parseInt(passengers),
-              booking_date: date,
-              start_time: startTime,
-              destination_id: selectedDest!.id,
-              tour_package_id: null,
-              no_of_hours: null,
-              car_model: selectedCarModel.model_name,
-              amount_total: cost,
-              booking_status: 'pending',
-            }
-          : {
-              booking_id: bookingId,
-              booking_type: 'hourly',
-              user_name: name,
-              user_email: email,
-              phone,
-              passenger_count: parseInt(passengers),
-              booking_date: date,
-              start_time: startTime,
-              destination_id: null,
-              tour_package_id: null,
-              no_of_hours: noOfHours,
-              car_model: selectedCarModel.model_name,
-              amount_total: cost,
-              booking_status: 'pending',
-            }
-
-      const res = await fetch('/api/bookings/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      const res = await fetch('/api/bookings/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       const result = await res.json()
-      const savedBooking = result.success ? result.booking : null
-
-      if (!savedBooking) {
-        toast.error(result.error || 'Failed to save booking. Please try again.')
-        if (result.code === 'MODEL_UNAVAILABLE') {
-          setSelectedCarModel(null)
-          await loadCars()
-        }
+      if (!result.success || !result.booking) {
+        toast.error(result.error || 'Failed to create booking')
         setIsSubmitting(false)
         return
       }
-
-      const endDateTime = new Date(savedBooking.end_datetime)
-      const endTimeStr = endDateTime.toTimeString().slice(0, 5)
-
-      const sessionPayload =
-        mode === 'airport'
-          ? {
-              bookingId,
-              bookingType: 'airport',
-              name, email, phone,
-              destination: selectedDest!.name,
-              distance: selectedDest!.distance_km,
-              car: selectedCarModel.model_name,
-              carType: selectedCarModel.class,
-              passengers,
-              date, time: startTime, startTime, endTime: endTimeStr,
-              totalPrice: cost,
-              advancePayment: advance,
-              userId: user?.id,
-              dbBookingId: savedBooking.id,
-            }
-          : {
-              bookingId,
-              bookingType: 'hourly',
-              name, email, phone,
-              noOfHours,
-              car: selectedCarModel.model_name,
-              carType: selectedCarModel.class,
-              passengers,
-              date, time: startTime, startTime, endTime: endTimeStr,
-              totalPrice: cost,
-              advancePayment: advance,
-              userId: user?.id,
-              dbBookingId: savedBooking.id,
-            }
-
-      sessionStorage.removeItem('tourBookingData')
-      sessionStorage.setItem('bookingData', JSON.stringify(sessionPayload))
-      toast.success('Booking created! Proceeding to payment...')
-      window.location.href = `/payment?bookingId=${bookingId}&amount=${advance}`
-    } catch (err) {
-      console.error('Booking error:', err)
-      toast.error('An error occurred while creating the booking')
+      const confirmedTotal = Number(result.booking.amount_total || totalCost)
+      const confirmedAdvance = Math.round(confirmedTotal * 0.3 * 100) / 100
+      sessionStorage.setItem(
+        'bookingData',
+        JSON.stringify({
+          bookingId,
+          bookingType: 'taxi',
+          name,
+          email,
+          phone,
+          destination: selectedDest.name,
+          car: selectedCarModel.model_name,
+          passengers,
+          date,
+          startTime,
+          totalPrice: confirmedTotal,
+          advancePayment: confirmedAdvance,
+          dbBookingId: result.booking.id,
+          endTime: new Date(result.booking.end_datetime).toTimeString().slice(0, 5),
+        })
+      )
+      window.location.href = `/payment?bookingId=${bookingId}&amount=${confirmedAdvance}`
+    } catch {
+      toast.error('Booking failed')
       setIsSubmitting(false)
     }
   }
 
-  // ── Shared UI helpers ─────────────────────────────────────────────────────
-  const StepIndicator = ({ steps, labels, current }: {
-    steps: string[]
-    labels: Record<string, string>
-    current: string
-  }) => {
-    const idx = steps.indexOf(current)
+  if (isLoading) return <div className="min-h-screen bg-primary-950" />
+
+  // Modern step indicator helper
+  const StepIndicator = () => {
     return (
-      <div className="mb-2 shrink-0 rounded-2xl border border-primary-800 bg-primary-900/45 px-3 py-2.5 md:px-5">
-        <div
-          className="grid items-center gap-x-1.5"
-          style={{ gridTemplateColumns: `repeat(${steps.length * 2 - 1}, minmax(0, 1fr))` }}
-        >
-          {steps.map((step, i) => (
-            <div
-              key={`${step}-dot`}
-              className={`w-8 h-8 mx-auto rounded-full flex items-center justify-center font-semibold text-sm transition-all ${
-                idx >= i ? 'bg-secondary-500 text-primary-950' : 'bg-primary-800 text-gray-400'
+      <div className="px-1">
+        <div className="flex items-center">
+          {AIRPORT_STEPS.map((item, index) => {
+            const active = index === currentStepIndex
+            const done = index < currentStepIndex
+            return (
+              <Fragment key={item}>
+                <div className="shrink-0">
+                  <div
+                    className={`h-10 w-10 md:h-12 md:w-12 rounded-full border-2 flex items-center justify-center font-bold text-sm md:text-base transition-all duration-300 ${
+                      active
+                        ? 'border-secondary-400 bg-secondary-500/25 text-secondary-100 shadow-[0_0_20px_rgba(255,214,10,0.25)]'
+                        : done
+                          ? 'border-emerald-400 bg-emerald-500/15 text-emerald-200'
+                          : 'border-white/15 bg-white/[0.03] text-gray-400'
+                    }`}
+                  >
+                    {done ? <Check className="h-5 w-5 md:h-6 md:w-6" /> : index + 1}
+                  </div>
+                </div>
+
+                {index < AIRPORT_STEPS.length - 1 && (
+                  <div
+                    className={`mx-1 md:mx-2 h-1 flex-1 rounded-full transition-all duration-300 ${
+                      done ? 'bg-emerald-400/40' : active ? 'bg-secondary-400/50' : 'bg-white/10'
+                    }`}
+                  />
+                )}
+              </Fragment>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  const toDayjsDate = (input: string): Dayjs => {
+    if (!input) return dayjs().startOf('day')
+    const parsed = dayjs(input, 'YYYY-MM-DD', true)
+    return parsed.isValid() ? parsed.startOf('day') : dayjs().startOf('day')
+  }
+
+  const toDayjsTime = (input: string): Dayjs => {
+    const base = dayjs()
+    if (!input) return base.hour(9).minute(0).second(0)
+    const [hours, minutes] = input.split(':').map(Number)
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return base.hour(9).minute(0).second(0)
+    return base.hour(hours).minute(minutes).second(0)
+  }
+
+  const formatDisplayTime = (input: string): string => {
+    if (!input) return '-- : --'
+    const parsed = dayjs(input, 'HH:mm', true)
+    if (!parsed.isValid()) return '-- : --'
+    return parsed.format('hh:mm A')
+  }
+
+  // Industry-standard calendar picker
+  const DatePickerModal = ({ isOpen, onClose, value, onChange }: { isOpen: boolean; onClose: () => void; value: string; onChange: (date: string) => void }) => {
+    const [draftDate, setDraftDate] = useState<Dayjs>(toDayjsDate(value))
+
+    useEffect(() => {
+      if (isOpen) setDraftDate(toDayjsDate(value))
+    }, [isOpen, value])
+
+    if (!isOpen) return null
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/55 backdrop-blur-sm">
+        <div className="w-full md:w-auto rounded-t-3xl md:rounded-2xl border border-white/15 bg-primary-900/95 backdrop-blur-xl md:bg-primary-900 p-5 md:p-6 shadow-2xl md:max-w-sm">
+          <p className="text-white text-sm font-semibold tracking-wide uppercase mb-3">Select Date</p>
+
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-2 md:p-3">
+            <div className="flex justify-center">
+              <DateCalendar
+                value={draftDate}
+                minDate={dayjs().startOf('day')}
+                onChange={(next) => {
+                  if (next) setDraftDate(next.startOf('day'))
+                }}
+                sx={{
+                  width: { xs: 300, sm: 330 },
+                  maxWidth: '100%',
+                  minHeight: { xs: 310, sm: 330 },
+                  color: '#fff',
+                  '& .MuiPickersCalendarHeader-label': {
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: '1.1rem',
+                  },
+                  '& .MuiIconButton-root': {
+                    color: '#FACC15',
+                  },
+                  '& .MuiDayCalendar-weekDayLabel': {
+                    color: '#d0d0d0',
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                  },
+                  '& .MuiPickerDay-root, & .MuiPickersDay-root': {
+                    color: '#ffffff !important',
+                    WebkitTextFillColor: '#ffffff',
+                    border: '1px solid transparent',
+                    fontSize: '1.05rem',
+                    fontWeight: 600,
+                  },
+                  '& .MuiPickerDay-root *, & .MuiPickersDay-root *': {
+                    color: '#ffffff !important',
+                    WebkitTextFillColor: '#ffffff',
+                  },
+                  '& .MuiPickerDay-root:hover, & .MuiPickersDay-root:hover': {
+                    backgroundColor: 'rgba(255,214,10,0.25)',
+                    color: '#ffffff !important',
+                  },
+                  '& .MuiPickerDay-root.Mui-selected, & .MuiPickersDay-root.Mui-selected': {
+                    backgroundColor: '#0066ff',
+                    color: '#ffffff !important',
+                    WebkitTextFillColor: '#ffffff',
+                    fontWeight: 800,
+                  },
+                  '& .MuiPickerDay-root.Mui-selected:hover, & .MuiPickersDay-root.Mui-selected:hover': {
+                    backgroundColor: '#0052cc',
+                    color: '#ffffff !important',
+                  },
+                  '& .MuiPickerDay-root.Mui-disabled, & .MuiPickersDay-root.Mui-disabled': {
+                    color: 'rgba(241, 245, 249, 0.82) !important',
+                    WebkitTextFillColor: 'rgba(241, 245, 249, 0.82)',
+                    fontSize: '1.05rem',
+                    fontWeight: 500,
+                  },
+                  '& .MuiPickerDay-root.Mui-disabled *, & .MuiPickersDay-root.Mui-disabled *': {
+                    color: 'rgba(241, 245, 249, 0.82) !important',
+                    WebkitTextFillColor: 'rgba(241, 245, 249, 0.82)',
+                  },
+                  '& .MuiPickerDay-root.MuiPickersDay-today, & .MuiPickersDay-root.MuiPickersDay-today, & .MuiPickerDay-root[aria-current="date"], & .MuiPickersDay-root[aria-current="date"]': {
+                    border: '2px solid rgba(0, 0, 0, 0.92) !important',
+                    boxSizing: 'border-box',
+                  },
+                  '& .MuiPickerDay-root.MuiPickersDay-today.Mui-selected, & .MuiPickersDay-root.MuiPickersDay-today.Mui-selected, & .MuiPickerDay-root[aria-current="date"].Mui-selected, & .MuiPickersDay-root[aria-current="date"].Mui-selected': {
+                    boxShadow: 'inset 0 0 0 2px rgba(0, 0, 0, 0.92)',
+                  },
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 flex gap-3">
+            <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-white/15 text-white py-3 font-bold hover:bg-white/5 transition">
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onChange(draftDate.format('YYYY-MM-DD'))
+                onClose()
+              }}
+              className="flex-1 rounded-lg bg-secondary-500 text-primary-950 py-3 font-bold hover:bg-secondary-400 transition shadow-lg"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Industry-standard analog time picker
+  const TimePickerModal = ({ isOpen, onClose, value, onChange }: { isOpen: boolean; onClose: () => void; value: string; onChange: (time: string) => void }) => {
+    const [draftTime, setDraftTime] = useState<Dayjs>(toDayjsTime(value))
+    const [timeView, setTimeView] = useState<'hours' | 'minutes'>('hours')
+    const [meridiem, setMeridiem] = useState<'AM' | 'PM'>('AM')
+
+    const applyMeridiem = (nextMeridiem: 'AM' | 'PM') => {
+      const hour24 = draftTime.hour()
+      const isCurrentlyPM = hour24 >= 12
+      const shouldBePM = nextMeridiem === 'PM'
+      if (isCurrentlyPM === shouldBePM) {
+        setMeridiem(nextMeridiem)
+        return
+      }
+      const adjustedHour = shouldBePM ? hour24 + 12 : hour24 - 12
+      setDraftTime(draftTime.hour(adjustedHour))
+      setMeridiem(nextMeridiem)
+    }
+
+    useEffect(() => {
+      if (isOpen) {
+        const initial = toDayjsTime(value)
+        setDraftTime(initial)
+        setMeridiem(initial.hour() >= 12 ? 'PM' : 'AM')
+        setTimeView('hours')
+      }
+    }, [isOpen, value])
+
+    useEffect(() => {
+      setMeridiem(draftTime.hour() >= 12 ? 'PM' : 'AM')
+    }, [draftTime])
+
+    if (!isOpen) return null
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/55 backdrop-blur-sm">
+        <div className="w-full md:w-auto rounded-t-3xl md:rounded-2xl border border-white/15 bg-primary-900/95 backdrop-blur-xl md:bg-primary-900 p-5 md:p-6 shadow-2xl md:max-w-sm">
+          <p className="text-white text-sm font-semibold tracking-wide uppercase mb-2">Select Time</p>
+          <div className="flex items-center justify-center gap-3 mb-3">
+            <button
+              type="button"
+              onClick={() => setTimeView('hours')}
+              className={`rounded-lg px-3 py-1.5 text-4xl md:text-5xl font-black font-mono tracking-wider transition ${
+                timeView === 'hours'
+                  ? 'bg-secondary-500/20 text-secondary-100'
+                  : 'text-white hover:bg-white/10'
               }`}
-              style={{ gridColumn: `${i * 2 + 1} / ${i * 2 + 2}` }}
             >
-              {i + 1}
+              {draftTime.format('hh')}
+            </button>
+            <span className="text-4xl md:text-5xl font-black text-white font-mono tracking-wider">:</span>
+            <button
+              type="button"
+              onClick={() => setTimeView('minutes')}
+              className={`rounded-lg px-3 py-1.5 text-4xl md:text-5xl font-black font-mono tracking-wider transition ${
+                timeView === 'minutes'
+                  ? 'bg-secondary-500/20 text-secondary-100'
+                  : 'text-white hover:bg-white/10'
+              }`}
+            >
+              {draftTime.format('mm')}
+            </button>
+            <div className="ml-1 flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => applyMeridiem('AM')}
+                className={`rounded-md px-2.5 py-1 text-xs font-bold tracking-wide transition ${
+                  meridiem === 'AM'
+                    ? 'bg-secondary-500 text-primary-950'
+                    : 'border border-white/15 text-white hover:bg-white/10'
+                }`}
+              >
+                AM
+              </button>
+              <button
+                type="button"
+                onClick={() => applyMeridiem('PM')}
+                className={`rounded-md px-2.5 py-1 text-xs font-bold tracking-wide transition ${
+                  meridiem === 'PM'
+                    ? 'bg-secondary-500 text-primary-950'
+                    : 'border border-white/15 text-white hover:bg-white/10'
+                }`}
+              >
+                PM
+              </button>
             </div>
-          ))}
-          {steps.slice(0, -1).map((step, i) => (
-            <div
-              key={`${step}-line`}
-              className={`h-1 rounded transition-all ${idx > i ? 'bg-secondary-500' : 'bg-primary-800'}`}
-              style={{ gridColumn: `${i * 2 + 2} / ${i * 2 + 3}` }}
+          </div>
+          <p className="text-center text-xs text-gray-400 mb-3">
+            Tap <span className="font-semibold text-white">hour</span> or <span className="font-semibold text-white">minute</span> to switch views
+          </p>
+
+          <div className="flex justify-center">
+            <TimeClock
+              value={draftTime}
+              ampm
+              views={['hours', 'minutes']}
+              view={timeView}
+              onViewChange={(nextView) => {
+                if (nextView === 'hours' || nextView === 'minutes') setTimeView(nextView)
+              }}
+              onChange={(next) => {
+                if (next) setDraftTime(next)
+              }}
+              sx={{
+                width: { xs: 280, sm: 310 },
+                maxWidth: '100%',
+                minHeight: { xs: 300, sm: 320 },
+                color: '#fff',
+                '& .MuiClock-root': {
+                  backgroundColor: 'rgba(255,255,255,0.04)',
+                },
+                '& .MuiClock-clock': {
+                  backgroundColor: 'rgba(255,255,255,0.04)',
+                },
+                '& .MuiClockNumber-root': {
+                  color: 'rgba(255,255,255,0.84)',
+                  fontWeight: 700,
+                },
+                '& .MuiClockNumber-root.Mui-selected': {
+                  color: '#1a120f',
+                },
+                '& .MuiClockPointer-root': {
+                  backgroundColor: '#FFD60A',
+                },
+                '& .MuiClockPointer-thumb': {
+                  backgroundColor: '#FFD60A',
+                  borderColor: '#FFD60A',
+                },
+                '& .MuiClock-pin': {
+                  backgroundColor: '#FFD60A',
+                },
+              }}
             />
-          ))}
-        </div>
-        <div
-          className="grid text-xs text-gray-400 mt-2"
-          style={{ gridTemplateColumns: `repeat(${steps.length * 2 - 1}, minmax(0, 1fr))` }}
-        >
-          {steps.map((step, i) => (
-            <span
-              key={step}
-              className="text-center px-0.5 text-[11px] md:text-xs leading-tight"
-              style={{ gridColumn: `${i * 2 + 1} / ${i * 2 + 2}` }}
+          </div>
+
+          <div className="mt-4 flex gap-3">
+            <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-white/15 text-white py-3 font-bold hover:bg-white/5 transition">
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onChange(draftTime.format('HH:mm'))
+                onClose()
+              }}
+              className="flex-1 rounded-lg bg-secondary-500 text-primary-950 py-3 font-bold hover:bg-secondary-400 transition shadow-lg"
             >
-              {labels[step]}
-            </span>
-          ))}
+              OK
+            </button>
+          </div>
         </div>
       </div>
     )
   }
 
-  const NavButtons = ({ onPrev, isFirst, isLast }: {
-    onPrev: () => void
-    isFirst: boolean
-    isLast: boolean
-  }) => (
-    <div className="flex gap-3 mt-2 pt-2 border-t border-primary-800/80 bg-primary-950/75 backdrop-blur-sm shrink-0">
-      {!isFirst && (
-        <button type="button" onClick={onPrev}
-          className="flex-1 px-4 py-2.5 border border-primary-700 bg-primary-900/60 text-gray-200 rounded-xl hover:bg-primary-900 font-semibold transition-smooth text-sm">
-          Previous
-        </button>
-      )}
-      <button type="submit" disabled={isSubmitting}
-        className={`flex-1 px-4 py-2.5 rounded-xl font-semibold transition-smooth text-sm ${
-          isLast ? 'bg-secondary-500 text-primary-950 shadow-[0_14px_30px_rgba(255,218,0,0.35)]' : 'bg-primary-950 text-white border border-secondary-500/40 hover:bg-primary-900'
-        } ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}>
-        {isSubmitting ? 'Processing...' : isLast ? 'Proceed to Payment' : 'Next →'}
-      </button>
-    </div>
-  )
+  return (
+    <div className="flex min-h-screen flex-col overflow-hidden bg-primary-950">
+      <Header />
+      <main className="mt-[72px] h-[calc(100vh-72px)] overflow-hidden bg-[radial-gradient(circle_at_top,rgba(255,214,10,0.08),transparent_24%),linear-gradient(180deg,#1a120f_0%,#140f0d_100%)] md:mt-[84px] md:h-[calc(100vh-84px)]">
+        <div className="container mx-auto h-full max-w-4xl px-3 pt-[5px] pb-3 md:px-4 md:pt-[5px] md:pb-4">
+          <div className="flex h-full max-w-full flex-col gap-4">
+            {/* Step Indicator */}
+            <StepIndicator />
 
-  // ── Passengers step (shared) ──────────────────────────────────────────────
-  const PassengersStep = () => (
-    <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 text-gray-100">
-      <h2 className="text-xl md:text-2xl font-black text-white mb-4 md:mb-6">Number of Passengers</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {[1, 2, 3, 4, 5, 6].map((n) => (
-          <button key={n} type="button" onClick={() => setPassengers(n.toString())}
-            className={`p-4 border-2 rounded-lg font-semibold transition-smooth ${
-              passengers === n.toString()
-                ? 'border-secondary-500 bg-secondary-500/15 text-secondary-400'
-                : 'border-primary-700 hover:border-secondary-500/60 bg-primary-950/35 hover:bg-primary-950/55 text-gray-200'
-            }`}>
-            <Users className="w-5 h-5 mx-auto mb-1" />
-            {n} {n === 1 ? 'Person' : 'People'}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-
-  // ── Date step (shared) ────────────────────────────────────────────────────
-  const DateStep = () => (
-    <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 text-gray-100">
-      <h2 className="text-2xl font-black text-white mb-6">Booking Date</h2>
-      <label className="block text-sm font-semibold text-gray-300 mb-2">Select Date *</label>
-      <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-        className="input-field w-full !bg-primary-950/70 !border-primary-700 !text-white placeholder:!text-gray-500 focus:!border-secondary-500" min={new Date().toISOString().split('T')[0]} required />
-    </div>
-  )
-
-  // ── Time step (shared) ────────────────────────────────────────────────────
-  const TimeStep = ({ hint }: { hint?: string }) => (
-    <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 text-gray-100">
-      <h2 className="text-2xl font-black text-white mb-6">Pickup Time</h2>
-      <label className="block text-sm font-semibold text-gray-300 mb-2">Select Pickup Time *</label>
-      <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
-        className="input-field w-full !bg-primary-950/70 !border-primary-700 !text-white placeholder:!text-gray-500 focus:!border-secondary-500" required />
-      {hint && (
-        <div className="mt-4 p-4 bg-secondary-500/10 border border-secondary-500/25 rounded-xl">
-          <p className="text-sm text-secondary-300">{hint}</p>
-        </div>
-      )}
-    </div>
-  )
-
-  // ── Car selection (shared, shows different rate based on mode) ────────────
-  const CarStep = () => (
-    <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 text-gray-100">
-      {loadingCars ? (
-        <p className="text-gray-400">Loading available car models...</p>
-      ) : availableCarModels.length === 0 ? (
-        <p className="text-gray-400">No car models available for {passengers} passenger(s) in this timeslot. Try adjusting your booking time or passenger count.</p>
-      ) : (
-        <>
-          {/* Search */}
-          <div className="relative mb-3">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search car model..."
-              value={carSearch}
-              onChange={(e) => setCarSearch(e.target.value)}
-              className="w-full pl-9 pr-9 py-2 rounded-lg border border-primary-700 bg-primary-950/70 text-white placeholder:text-gray-500 text-sm focus:outline-none focus:border-secondary-500"
-            />
-            {carSearch && (
-              <button type="button" onClick={() => setCarSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200">
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Class filter chips */}
-          {carClasses.length > 1 && (
-            <div className="flex flex-wrap gap-2 mb-3">
-              <button
-                type="button"
-                onClick={() => setCarClassFilter('')}
-                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-smooth ${
-                  carClassFilter === '' ? 'bg-secondary-500 text-primary-950 border-secondary-500' : 'border-primary-700 text-gray-400 hover:border-secondary-500/50 hover:text-gray-200'
-                }`}
-              >
-                All
-              </button>
-              {carClasses.map((cls) => (
-                <button
-                  key={cls}
-                  type="button"
-                  onClick={() => setCarClassFilter(cls === carClassFilter ? '' : cls)}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition-smooth ${
-                    carClassFilter === cls ? 'bg-secondary-500 text-primary-950 border-secondary-500' : 'border-primary-700 text-gray-400 hover:border-secondary-500/50 hover:text-gray-200'
-                  }`}
-                >
-                  {cls}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Sort controls */}
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            <span className="text-xs text-gray-500 shrink-0">Sort by:</span>
-            {([
-              { key: 'price-asc', label: 'Price ↑' },
-              { key: 'price-desc', label: 'Price ↓' },
-              { key: 'capacity-asc', label: 'Capacity ↑' },
-              { key: 'capacity-desc', label: 'Capacity ↓' },
-            ] as const).map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setCarSort(carSort === key ? '' : key)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-smooth ${
-                  carSort === key ? 'bg-secondary-500 text-primary-950 border-secondary-500' : 'border-primary-700 text-gray-400 hover:border-secondary-500/50 hover:text-gray-200'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {filteredCarModels.length === 0 ? (
-            <p className="text-gray-400 text-sm">No cars match your search.</p>
-          ) : (
-            <div className="space-y-3">
-              {filteredCarModels.map((model) => {
-                const estimate = mode === 'airport'
-                  ? selectedDest ? `Rs. ${(selectedDest.distance_km * model.per_km_charge).toFixed(0)}` : 'Price on request'
-                  : `Rs. ${(noOfHours * model.per_hr_charge).toFixed(0)}`
-                return (
-                  <button key={model.model_name} type="button"
-                    onClick={() => setSelectedCarModel(model)}
-                    className={`w-full p-4 border-2 rounded-lg text-left transition-smooth ${
-                      selectedCarModel?.model_name === model.model_name
-                        ? 'border-secondary-500 bg-secondary-500/15'
-                        : 'border-primary-700 hover:border-secondary-500/60 bg-primary-950/35 hover:bg-primary-950/55 text-gray-200'
-                    }`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <p className="font-semibold text-lg">{model.model_name}</p>
-                        <p className="text-sm text-gray-400">Class: {model.class} · Capacity: {model.capacity} pax</p>
-                        <p className="text-sm text-secondary-600 font-semibold mt-2">
-                          Estimated: {estimate}
-                        </p>
+            {/* Main Content Form */}
+            <form onSubmit={step === 'confirm' ? onSubmit : onNext} className="flex min-h-0 flex-1 flex-col gap-4">
+              {/* Content Area */}
+              <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-md p-5 md:p-6 shadow-xl">
+                <div className="h-full min-h-0 overflow-y-auto pr-2 scrollbar-thin-modern">
+                  {step === 'route' && (
+                    <div className="flex flex-col gap-4 h-full min-h-0">
+                      {/* Fixed Passengers Section */}
+                      <div>
+                        <label className="flex items-center gap-2 text-lg font-bold text-white mb-2">
+                          <Users className="h-5 w-5 text-secondary-300" />
+                          How Many Passengers?
+                        </label>
+                        <div className="grid grid-cols-6 gap-1.5 md:gap-2">
+                          {[1, 2, 3, 4, 5, 6].map((n) => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => setPassengers(String(n))}
+                              className={`w-full rounded-lg border-2 py-1.5 md:py-3 text-xs md:text-base font-bold transition-all duration-200 ${
+                                passengers === String(n)
+                                  ? 'border-secondary-400 bg-secondary-500/20 text-secondary-100 shadow-[0_0_15px_rgba(255,214,10,0.15)]'
+                                  : 'border-white/15 bg-white/[0.03] text-gray-300 hover:border-secondary-400/50'
+                              }`}
+                            >
+                              {n}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      <Car className="w-6 h-6 text-secondary-500 shrink-0 ml-3" />
+
+                      {/* Scrollable Destination Section */}
+                      <div className="flex flex-col gap-2 min-h-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="flex items-center gap-2 text-lg font-bold text-white">
+                            <MapPin className="h-5 w-5 text-secondary-300" />
+                            Select Destination
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDestinationSortOrder((v) =>
+                                v === 'default' ? 'asc' : v === 'asc' ? 'desc' : 'default'
+                              )
+                            }
+                            className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                              destinationSortOrder !== 'default'
+                                ? 'border-secondary-400 bg-secondary-500/20 text-secondary-100'
+                                : 'border-white/20 bg-white/[0.03] text-gray-300 hover:border-secondary-400/50'
+                            }`}
+                          >
+                            {destinationSortOrder === 'asc' ? 'A-Z' : destinationSortOrder === 'desc' ? 'Z-A' : 'Sort'}
+                          </button>
+                        </div>
+                        <div className="relative mb-1">
+                          <Search className="absolute left-4 top-3.5 h-4 w-4 text-gray-400" />
+                          <input
+                            value={destinationSearch}
+                            onChange={(e) => setDestinationSearch(e.target.value)}
+                            placeholder="Search destination..."
+                            className="w-full rounded-xl border border-white/15 bg-white/[0.05] py-3 pl-12 pr-4 text-white placeholder:text-gray-500 focus:border-secondary-400 focus:bg-white/[0.08] focus:outline-none transition-colors"
+                          />
+                          {destinationSearch && (
+                            <button 
+                              type="button" 
+                              onClick={() => setDestinationSearch('')} 
+                              className="absolute right-4 top-3.5 text-gray-400 hover:text-white transition-colors"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+
+                        {loadingDest ? (
+                          <div className="flex items-center justify-center py-8">
+                            <p className="text-gray-300">Loading destinations...</p>
+                          </div>
+                        ) : (
+                          <div className="grid content-start auto-rows-max gap-3 overflow-y-auto pr-2 scrollbar-thin-modern min-h-0 flex-1">
+                            {filteredDestinations.map((d) => (
+                              <button
+                                key={d.id}
+                                type="button"
+                                onClick={() => setSelectedDest(d)}
+                                className={`relative rounded-xl border-2 px-4 py-4 text-left transition-all duration-200 group ${
+                                  selectedDest?.id === d.id
+                                    ? 'border-secondary-400 bg-secondary-500/15 shadow-[0_0_20px_rgba(255,214,10,0.15)]'
+                                    : 'border-white/15 bg-white/[0.03] hover:border-secondary-400/50 hover:bg-white/[0.06]'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <p className="font-semibold text-white text-sm md:text-base">{d.name}</p>
+                                    <p className="mt-1 text-xs md:text-sm text-gray-400">
+                                      ⏱ {formatDurationMinutes(d.estimated_duration_minutes)}
+                                    </p>
+                                  </div>
+                                  {selectedDest?.id === d.id && (
+                                    <div className="h-6 w-6 rounded-full bg-secondary-400 flex items-center justify-center">
+                                      <Check className="h-4 w-4 text-primary-950 font-bold" />
+                                    </div>
+                                  )}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  )
+                  )}
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-col min-h-screen">
-        <Header />
-        <main className="flex-1 flex items-center justify-center bg-primary-950">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-secondary-500" />
-        </main>
-        <Footer />
-      </div>
-    )
-  }
-
-  const advance = Math.round(totalCost * 0.3 * 100) / 100
-  const remaining = Math.round(totalCost * 0.7 * 100) / 100
-
-  // ── Airport flow render ───────────────────────────────────────────────────
-  const renderAirport = () => {
-    const idx = AIRPORT_STEPS.indexOf(airportStep)
-    const isFirst = airportStep === 'route'
-    const isLast = airportStep === 'confirm'
-
-    return (
-      <form
-        onSubmit={isLast ? handleSubmit : handleAirportNext}
-        className="flex-1 flex flex-col overflow-hidden"
-      >
-        <div className="flex-1 min-h-0 overflow-y-auto pr-1 scrollbar-thin-modern">
-        {/* Route: Destination + Passengers */}
-        {airportStep === 'route' && (
-          <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 space-y-8 text-gray-100">
-            {/* Destination */}
-            <div>
-              {!selectedDest ? (
-                <>
-                  {/* Search Bar */}
-                  {destinations.length > 0 && (
-                    <div className="relative mb-4">
-                      <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <input
-                        type="text"
-                        placeholder="Search destinations..."
-                        value={destinationSearch}
-                        onChange={(e) => setDestinationSearch(e.target.value)}
-                        className="w-full pl-10 pr-10 py-2 border-2 border-gray-300 rounded-lg focus:border-secondary-500 focus:outline-none"
-                      />
-                      {destinationSearch && (
+                  {step === 'schedule' && (
+                    <div className="space-y-4">
+                      {/* Date Selection */}
+                      <div>
+                        <label className="flex items-center gap-2 text-lg font-bold text-white mb-3">
+                          <Calendar className="h-5 w-5 text-secondary-300" />
+                          Pickup Date
+                        </label>
                         <button
                           type="button"
-                          onClick={() => setDestinationSearch('')}
-                          className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
+                          onClick={() => setShowDatePicker(true)}
+                          className="w-full rounded-xl border-2 border-white/15 bg-white/[0.05] px-4 py-4 text-left hover:border-secondary-400 hover:bg-white/[0.08] transition-all"
                         >
-                          <X className="w-5 h-5" />
+                          <p className="text-gray-400 text-sm mb-1">Selected Date</p>
+                          <p className="text-white font-bold text-lg">
+                            {date ? new Date(date).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '-- / -- / ----'}
+                          </p>
                         </button>
+                      </div>
+
+                      {/* Time Selection */}
+                      <div>
+                        <label className="flex items-center gap-2 text-lg font-bold text-white mb-3">
+                          <Clock className="h-5 w-5 text-secondary-300" />
+                          Pickup Time
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowTimePicker(true)}
+                          className="w-full rounded-xl border-2 border-white/15 bg-white/[0.05] px-4 py-4 text-left hover:border-secondary-400 hover:bg-white/[0.08] transition-all"
+                        >
+                          <p className="text-gray-400 text-sm mb-1">Selected Time</p>
+                          <p className="text-white font-bold text-lg font-mono tracking-widest">
+                            {formatDisplayTime(startTime)}
+                          </p>
+                        </button>
+                      </div>
+
+                      {/* Journey Summary */}
+                      <div className="rounded-xl border border-white/15 bg-white/[0.03] p-4 backdrop-blur-sm">
+                        <p className="text-sm text-gray-400 mb-2">Journey Summary</p>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-gray-300">Destination:</span>
+                            <span className="font-semibold text-white">{selectedDest?.name || '—'}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-300">Estimated Duration:</span>
+                            <span className="font-semibold text-white">{selectedDest ? formatDurationMinutes(selectedDest.estimated_duration_minutes) : '—'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {step === 'car' && (
+                    <div className="space-y-4">
+                      <label className="flex items-center gap-2 text-lg font-bold text-white mb-3">
+                        <Car className="h-5 w-5 text-secondary-300" />
+                        Select Car Type
+                      </label>
+
+                      {loadingCars ? (
+                        <div className="flex items-center justify-center py-8">
+                          <p className="text-gray-300">Loading available cars...</p>
+                        </div>
+                      ) : availableCarModels.length > 0 ? (
+                        <div className="space-y-3">
+                          {filteredCars.map((c) => (
+                            <button
+                              key={c.model_name}
+                              type="button"
+                              onClick={() => setSelectedCarModel(c)}
+                              className={`relative rounded-xl border-2 px-4 py-4 text-left transition-all duration-200 ${
+                                selectedCarModel?.model_name === c.model_name
+                                  ? 'border-secondary-400 bg-secondary-500/15 shadow-[0_0_20px_rgba(255,214,10,0.15)]'
+                                  : 'border-white/15 bg-white/[0.03] hover:border-secondary-400/50 hover:bg-white/[0.06]'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <p className="font-bold text-white text-sm md:text-base">{c.model_name}</p>
+                                  <p className="mt-1 text-xs md:text-sm text-gray-400">
+                                    {c.class} • {c.capacity} {c.capacity === 1 ? 'passenger' : 'passengers'}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-bold text-secondary-200 text-sm md:text-base">{formatCurrency(c.fixed_fare)}</p>
+                                  <p className="text-xs text-gray-400">fixed rate</p>
+                                </div>
+                              </div>
+                              {selectedCarModel?.model_name === c.model_name && (
+                                <div className="absolute top-2 right-2 h-6 w-6 rounded-full bg-secondary-400 flex items-center justify-center">
+                                  <Check className="h-4 w-4 text-primary-950 font-bold" />
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-center">
+                          <p className="text-yellow-200 text-sm">No cars available for this time slot. Please select a different time.</p>
+                        </div>
                       )}
                     </div>
                   )}
 
-                  {loadingDest ? (
-                    <p className="text-gray-600">Loading destinations...</p>
-                  ) : destinations.length === 0 ? (
-                    <p className="text-gray-600">No destinations available.</p>
-                  ) : filteredDestinations.length === 0 ? (
-                    <p className="text-gray-600">No destinations match your search.</p>
-                  ) : (
-                    <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-thin-modern pr-1">
-                      {filteredDestinations.map((dest) => (
-                        <button key={dest.id} type="button"
-                          onClick={() => { setDestinationId(dest.id); setSelectedDest(dest) }}
-                          className={`w-full p-4 border-2 rounded-lg text-left transition-smooth ${
-                            destinationId === dest.id
-                              ? 'border-secondary-500 bg-secondary-50'
-                              : 'border-gray-300 hover:border-secondary-300'
-                          }`}>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-semibold">{dest.name}</p>
-                              <p className="text-sm text-gray-600">{dest.distance_km} km � Est. {formatDurationMinutes(dest.estimated_duration_minutes)}</p>
-                              {dest.description && <p className="text-xs text-gray-500 mt-1">{dest.description}</p>}
-                            </div>
-                            <MapPin className="w-5 h-5 text-secondary-500 shrink-0 ml-3" />
-                          </div>
-                        </button>
-                      ))}
+                  {step === 'contact' && (
+                    <div className="space-y-4">
+                      <h2 className="text-lg font-bold text-white mb-4">Contact Details</h2>
+                      <ContactStep
+                        name={name}
+                        phone={phone}
+                        email={email}
+                        nameInputRef={nameInputRef}
+                        phoneInputRef={phoneInputRef}
+                        emailInputRef={emailInputRef}
+                        onNameChange={setName}
+                        onPhoneChange={setPhone}
+                        onEmailChange={setEmail}
+                      />
                     </div>
                   )}
-                </>
-              ) : (
-                <div className="p-4 rounded-xl border border-secondary-500/30 bg-secondary-500/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <p className="text-sm md:text-base text-gray-100">
-                    Destination selected: <span className="font-bold text-secondary-400">"{selectedDest.name}"</span>
-                  </p>
+
+                  {step === 'confirm' && (
+                    <div className="space-y-4">
+                      <h2 className="text-lg font-bold text-white mb-4">Review Your Booking</h2>
+
+                      {/* Booking Summary Cards */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3 md:p-4 backdrop-blur-sm">
+                          <p className="text-xs md:text-sm text-gray-400">Destination</p>
+                          <p className="mt-2 font-semibold text-white text-sm md:text-base">{selectedDest?.name || '—'}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3 md:p-4 backdrop-blur-sm">
+                          <p className="text-xs md:text-sm text-gray-400">Car Type</p>
+                          <p className="mt-2 font-semibold text-white text-sm md:text-base">{selectedCarModel?.model_name || '—'}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3 md:p-4 backdrop-blur-sm">
+                          <p className="text-xs md:text-sm text-gray-400">Pickup</p>
+                          <p className="mt-2 font-semibold text-white text-sm md:text-base">{date}</p>
+                          <p className="text-xs text-gray-400 mt-1">{formatDisplayTime(startTime)}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/15 bg-white/[0.03] p-3 md:p-4 backdrop-blur-sm">
+                          <p className="text-xs md:text-sm text-gray-400">Passengers</p>
+                          <p className="mt-2 font-semibold text-white text-sm md:text-base">{passengers || '—'}</p>
+                        </div>
+                      </div>
+
+                      {/* Pricing Breakdown */}
+                      <div className="rounded-xl border-2 border-secondary-400/50 bg-secondary-500/15 p-4 backdrop-blur-sm">
+                        <p className="text-sm font-bold text-secondary-100 mb-4">Pricing Breakdown</p>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between text-gray-300">
+                            <span>Total Amount</span>
+                            <span className="font-semibold text-white">{formatCurrency(totalCost)}</span>
+                          </div>
+                          <div className="h-px bg-white/10 my-2" />
+                          <div className="flex justify-between text-gray-300">
+                            <span>Prebook Advance (30%)</span>
+                            <span className="font-semibold text-secondary-200">{formatCurrency(advance)}</span>
+                          </div>
+                          <div className="flex justify-between text-gray-300">
+                            <span>Pay at Airport Counter (70%)</span>
+                            <span className="font-semibold text-secondary-200">{formatCurrency(remaining)}</span>
+                          </div>
+                        </div>
+                        <div className="mt-4 rounded-lg border border-white/15 bg-white/[0.04] p-3 text-xs md:text-sm text-gray-200 space-y-2">
+                          <p className="font-semibold text-white">Payment Options on next step:</p>
+                          <p>1. Pay <span className="font-bold text-white">{formatCurrency(totalCost)}</span> now online (full payment).</p>
+                          <p>2. Pay <span className="font-bold text-white">{formatCurrency(advance)}</span> now to prebook, then pay <span className="font-bold text-white">{formatCurrency(remaining)}</span> in cash at the airport counter.</p>
+                        </div>
+                      </div>
+
+                      {/* Contact Info Display */}
+                      <div className="rounded-xl border border-white/15 bg-white/[0.03] p-4 backdrop-blur-sm">
+                        <p className="text-sm text-gray-400 mb-3">Contact Information</p>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center gap-2 text-gray-300">
+                            <User className="h-4 w-4 text-secondary-300" />
+                            <span>{name || '—'}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-gray-300">
+                            <Phone className="h-4 w-4 text-secondary-300" />
+                            <span>{phone || '—'}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-gray-300">
+                            <Mail className="h-4 w-4 text-secondary-300" />
+                            <span>{email || '—'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3">
+                {step !== 'route' && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setDestinationId('')
-                      setSelectedDest(null)
-                      setDestinationSearch('')
-                    }}
-                    className="px-4 py-2 rounded-lg border border-secondary-500/50 text-secondary-400 hover:bg-secondary-500/10 transition-smooth font-semibold text-sm"
+                    onClick={() => setStep(AIRPORT_STEPS[AIRPORT_STEPS.indexOf(step) - 1])}
+                    className="flex items-center justify-center gap-2 flex-1 rounded-xl border-2 border-white/20 bg-white/[0.05] px-4 py-3 md:py-4 text-sm md:text-base font-bold text-white hover:bg-white/[0.08] hover:border-white/30 transition-all duration-200"
                   >
-                    Choose Another
+                    <ChevronLeft className="h-5 w-5" />
+                    <span className="hidden sm:inline">Previous</span>
                   </button>
-                </div>
-              )}
-            </div>
-
-            {/* Passengers */}
-            {selectedDest && (
-              <div className="border-t pt-6 md:pt-8">
-                <h3 className="text-xl font-bold mb-4">Number of Passengers</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {[1, 2, 3, 4, 5, 6].map((n) => (
-                    <button key={n} type="button" onClick={() => setPassengers(n.toString())}
-                      className={`p-4 border-2 rounded-lg font-semibold transition-smooth text-center ${
-                        passengers === n.toString()
-                          ? 'border-secondary-500 bg-secondary-50 text-secondary-700'
-                          : 'border-gray-300 hover:border-secondary-300'
-                      }`}>
-                      <Users className="w-5 h-5 mx-auto mb-1" />
-                      {n} {n === 1 ? 'Person' : 'People'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Schedule: Date + Time */}
-        {airportStep === 'schedule' && (
-          <div className="relative rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 space-y-8 text-gray-100">
-            {selectedDest && (
-              <div className="absolute right-4 md:right-8 top-6 md:top-7 text-right pointer-events-none">
-                <p className="text-[11px] md:text-xs text-gray-300 leading-tight">
-                  Destination: <span className="font-semibold text-secondary-400">{selectedDest.name}</span>
-                </p>
-                <p className="text-[11px] md:text-xs text-gray-400 leading-tight">
-                  Est. duration: {formatDurationMinutes(selectedDest.estimated_duration_minutes)}
-                </p>
-              </div>
-            )}
-            {/* Date + Time */}
-            <div className="-mt-4 md:-mt-5">
-              <h2 className="text-2xl font-bold mb-4">Booking Date and Time</h2>
-              <label className="block text-sm font-semibold mb-2">Select Date *</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="input-field w-full" min={new Date().toISOString().split('T')[0]} required />
-            </div>
-
-            {/* Time */}
-            <div className="border-t pt-8">
-              <label className="block text-sm font-semibold mb-2">Select Pickup Time *</label>
-              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
-                className="input-field w-full" required />
-            </div>
-          </div>
-        )}
-
-        {airportStep === 'car' && <CarStep />}
-
-          {airportStep === 'contact' && (
-            <ContactStepComponent
-              name={name}
-              phone={phone}
-              email={email}
-              nameInputRef={nameInputRef}
-              phoneInputRef={phoneInputRef}
-              emailInputRef={emailInputRef}
-              onNameChange={setName}
-              onPhoneChange={setPhone}
-              onEmailChange={setEmail}
-              isEmailLocked={true}
-            />
-          )}
-
-          {airportStep === 'confirm' && (
-            <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 space-y-6 text-gray-100">
-              <PriceBox
-                lines={[]}
-                total={totalCost} advance={advance} remaining={remaining}
-              />
-              <div className="bg-primary-950/50 border border-primary-800 rounded-xl p-5 space-y-3 text-sm">
-                <Row label="Name" value={name} />
-                <Row label="Phone" value={phone} />
-                <Row label="Email" value={email} />
-                <Row label="Destination" value={selectedDest?.name ?? '-'} />
-                <Row label="Passengers" value={passengers} />
-                <Row label="Date" value={new Date(date).toLocaleDateString('en-IN')} />
-                <Row label="Pickup Time" value={startTime} />
-                <div className="border-t pt-3">
-                  <Row label="Car Model" value={selectedCarModel?.model_name ?? '-'} />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <NavButtons onPrev={handleAirportPrev} isFirst={isFirst} isLast={isLast} />
-      </form>
-    )
-  }
-
-  // ── Hourly flow render ────────────────────────────────────────────────────
-  const renderHourly = () => {
-    const idx = HOURLY_STEPS.indexOf(hourlyStep)
-    const isFirst = hourlyStep === 'details'
-    const isLast = hourlyStep === 'confirm'
-
-    return (
-      <form
-        onSubmit={isLast ? handleSubmit : handleHourlyNext}
-        className="flex-1 flex flex-col overflow-hidden"
-      >
-        <div className="flex-1 min-h-0 overflow-y-auto pr-1 scrollbar-thin-modern">
-        {/* Details: Passengers + Date */}
-        {hourlyStep === 'details' && (
-          <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 space-y-8 text-gray-100">
-            {/* Passengers */}
-            <div>
-              <h2 className="text-xl md:text-2xl font-bold mb-4">Number of Passengers</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {[1, 2, 3, 4, 5, 6].map((n) => (
-                  <button key={n} type="button" onClick={() => setPassengers(n.toString())}
-                    className={`p-4 border-2 rounded-lg font-semibold transition-smooth text-center ${
-                      passengers === n.toString()
-                        ? 'border-secondary-500 bg-secondary-50 text-secondary-700'
-                        : 'border-gray-300 hover:border-secondary-300'
-                    }`}>
-                    <Users className="w-5 h-5 mx-auto mb-1" />
-                    {n} {n === 1 ? 'Person' : 'People'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Date */}
-            <div className="border-t pt-8">
-              <h3 className="text-xl font-bold mb-4">Booking Date</h3>
-              <label className="block text-sm font-semibold mb-2">Select Date *</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="input-field w-full" min={new Date().toISOString().split('T')[0]} required />
-            </div>
-          </div>
-        )}
-
-        {/* Schedule: Time + Hours */}
-        {hourlyStep === 'schedule' && (
-          <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 space-y-8 text-gray-100">
-            {/* Time */}
-            <div>
-              <h2 className="text-2xl font-bold mb-4">Pickup Time</h2>
-              <label className="block text-sm font-semibold mb-2">Select Pickup Time *</label>
-              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
-                className="input-field w-full" required />
-            </div>
-
-            {/* Duration Picker */}
-            <div className="border-t pt-8">
-              <h3 className="text-xl font-bold mb-4">Select Duration</h3>
-              <p className="text-gray-600 text-sm mb-6">How long do you need the taxi? Choose days and/or hours.</p>
-
-              <div className="grid grid-cols-2 gap-4 md:gap-6">
-                {/* Days */}
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-gray-600 mb-3">Days</p>
-                  <div className="flex items-center justify-center gap-4">
-                    <button type="button"
-                      onClick={() => setDurationDays(d => Math.max(0, d - 1))}
-                      disabled={durationDays === 0}
-                      className="w-10 h-10 rounded-full border-2 border-gray-300 text-xl font-bold hover:border-secondary-400 hover:bg-secondary-50 transition-smooth flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed">
-                      −
-                    </button>
-                    <span className="text-3xl font-bold w-10 text-center">{durationDays}</span>
-                    <button type="button"
-                      onClick={() => setDurationDays(d => d + 1)}
-                      className="w-10 h-10 rounded-full border-2 border-gray-300 text-xl font-bold hover:border-secondary-400 hover:bg-secondary-50 transition-smooth flex items-center justify-center">
-                      +
-                    </button>
-                  </div>
-                  <p className="text-sm text-gray-500 mt-2">day{durationDays !== 1 ? 's' : ''}</p>
-                </div>
-
-                {/* Hours */}
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-gray-600 mb-3">Hours</p>
-                  <div className="flex items-center justify-center gap-4">
-                    <button type="button"
-                      onClick={() => setDurationHrs(h => Math.max(durationDays > 0 ? 0 : 1, h - 1))}
-                      disabled={durationDays === 0 && durationHrs <= 1}
-                      className="w-10 h-10 rounded-full border-2 border-gray-300 text-xl font-bold hover:border-secondary-400 hover:bg-secondary-50 transition-smooth flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed">
-                      −
-                    </button>
-                    <span className="text-3xl font-bold w-10 text-center">{durationHrs}</span>
-                    <button type="button"
-                      onClick={() => setDurationHrs(h => Math.min(23, h + 1))}
-                      disabled={durationHrs >= 23}
-                      className="w-10 h-10 rounded-full border-2 border-gray-300 text-xl font-bold hover:border-secondary-400 hover:bg-secondary-50 transition-smooth flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed">
-                      +
-                    </button>
-                  </div>
-                  <p className="text-sm text-gray-500 mt-2">hour{durationHrs !== 1 ? 's' : ''}</p>
-                </div>
-              </div>
-
-              {/* Total summary */}
-              <div className="mt-6 p-4 bg-secondary-50 border border-secondary-200 rounded-lg text-center">
-                <div className="flex items-center justify-center gap-2">
-                  <Clock className="w-5 h-5 text-secondary-600" />
-                  <span className="text-xl font-bold text-secondary-700">{formatDuration(noOfHours)}</span>
-                </div>
-                {noOfHours >= 24 && (
-                  <p className="text-xs text-gray-500 mt-1">{noOfHours} hours total</p>
                 )}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex items-center justify-center gap-2 flex-1 rounded-xl bg-secondary-500 px-4 py-3 md:py-4 text-sm md:text-base font-bold text-primary-950 hover:bg-secondary-400 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-secondary-500 transition-all duration-200 shadow-[0_8px_20px_rgba(255,214,10,0.25)]"
+                >
+                  {step === 'confirm' ? (
+                    <>
+                      {isSubmitting ? (
+                        <>
+                          <span className="inline-block h-4 w-4 rounded-full border-2 border-primary-950 border-t-transparent animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          Proceed to Payment
+                          <ChevronRight className="h-5 w-5" />
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      Next
+                      <ChevronRight className="h-5 w-5" />
+                    </>
+                  )}
+                </button>
               </div>
-
-              {selectedCarModel && (
-                <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                  <p className="text-sm text-blue-800">
-                    <strong>Estimated Price:</strong> Rs. {hourlyTotal.toFixed(2)}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {hourlyStep === 'car' && <CarStep />}
-
-          {hourlyStep === 'contact' && (
-            <ContactStepComponent
-              name={name}
-              phone={phone}
-              email={email}
-              nameInputRef={nameInputRef}
-              phoneInputRef={phoneInputRef}
-              emailInputRef={emailInputRef}
-              onNameChange={setName}
-              onPhoneChange={setPhone}
-              onEmailChange={setEmail}
-              isEmailLocked={true}
-            />
-          )}
-
-          {hourlyStep === 'confirm' && (
-            <div className="rounded-2xl border border-secondary-500/20 bg-primary-900/65 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.35)] p-4 md:p-8 space-y-6 text-gray-100">
-              <PriceBox
-                lines={[]}
-                total={totalCost} advance={advance} remaining={remaining}
-              />
-              <div className="bg-primary-950/50 border border-primary-800 rounded-xl p-5 space-y-3 text-sm">
-                <Row label="Name" value={name} />
-                <Row label="Phone" value={phone} />
-                <Row label="Email" value={email} />
-                <Row label="Passengers" value={passengers} />
-                <Row label="Date" value={new Date(date).toLocaleDateString('en-IN')} />
-                <Row label="Pickup Time" value={startTime} />
-                <Row label="Duration" value={`${formatDuration(noOfHours)}${noOfHours >= 24 ? ` (${noOfHours} hrs)` : ''}`} />
-                <div className="border-t pt-3">
-                  <Row label="Car Model" value={selectedCarModel?.model_name ?? '-'} />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <NavButtons onPrev={handleHourlyPrev} isFirst={isFirst} isLast={isLast} />
-      </form>
-    )
-  }
-
-  // ── Main render ───────────────────────────────────────────────────────────
-  const currentStepStr = mode === 'airport' ? airportStep : hourlyStep
-  const steps = mode === 'airport' ? AIRPORT_STEPS : HOURLY_STEPS
-  const labels = mode === 'airport'
-    ? (AIRPORT_LABELS as Record<string, string>)
-    : (HOURLY_LABELS as Record<string, string>)
-
-  return (
-    <div className="flex flex-col h-[100dvh] overflow-hidden bg-primary-950">
-      <Header />
-
-      <main className="overflow-hidden flex flex-col py-2 md:py-3 bg-primary-950 relative mt-[72px] md:mt-[84px] h-[calc(100dvh-72px)] md:h-[calc(100dvh-84px)] min-h-0">
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, rgba(255,218,0,0.75) 1px, transparent 1px)', backgroundSize: '36px 36px' }} />
-        <div className="container mx-auto px-4 relative z-10 flex-1 flex flex-col overflow-hidden">
-          <h1 className="text-xl md:text-2xl font-black text-white text-center mb-2 tracking-tight shrink-0">Book Your Taxi</h1>
-
-          {/* ── Mode tabs ── */}
-          <div className="max-w-3xl mx-auto mb-2 w-full shrink-0">
-            <div className="flex rounded-2xl overflow-hidden border border-primary-700 bg-primary-900/70 backdrop-blur-sm shadow-[0_12px_36px_rgba(0,0,0,0.28)]">
-              <button
-                type="button"
-                onClick={() => switchMode('airport')}
-                className={`flex-1 py-2.5 px-4 font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
-                  mode === 'airport'
-                    ? 'bg-secondary-500 text-primary-950 shadow-[0_10px_24px_rgba(255,218,0,0.35)]'
-                    : 'text-gray-300 hover:bg-primary-900'
-                }`}
-              >
-                <MapPin className="w-4 h-4" />
-                Airport Transfer
-              </button>
-              <button
-                type="button"
-                onClick={() => switchMode('hourly')}
-                className={`flex-1 py-2.5 px-4 font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
-                  mode === 'hourly'
-                    ? 'bg-secondary-500 text-primary-950 shadow-[0_10px_24px_rgba(255,218,0,0.35)]'
-                    : 'text-gray-300 hover:bg-primary-900'
-                }`}
-              >
-                <Clock className="w-4 h-4" />
-                Hourly Booking
-              </button>
-            </div>
-          </div>
-          <div className="mb-2" />
-
-          <div className="max-w-2xl mx-auto flex-1 flex flex-col overflow-hidden w-full">
-            <StepIndicator steps={steps} labels={labels} current={currentStepStr} />
-            {mode === 'airport' ? renderAirport() : renderHourly()}
+            </form>
           </div>
         </div>
       </main>
 
-      {showAuthGate && (
-        <AuthGate
-          onClose={() => setShowAuthGate(false)}
-          onOAuthStart={persistForOAuth}
-        />
-      )}
-    </div>
-  )
-}
-
-// ── Small shared helpers ───────────────────────────────────────────────────
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between gap-4">
-      <span className="text-gray-400 shrink-0">{label}:</span>
-      <span className="font-semibold text-right text-gray-100">{value}</span>
-    </div>
-  )
-}
-
-function PriceBox({
-  lines, total, advance, remaining,
-}: {
-  lines: string[]
-  total: number
-  advance: number
-  remaining: number
-}) {
-  return (
-    <div className="bg-secondary-500/10 border border-secondary-500/25 rounded-xl p-5 space-y-3">
-      <div className="flex justify-between font-bold text-lg">
-        <span className="text-gray-100">Estimated Price:</span>
-        <span className="text-secondary-400">Rs. {total.toFixed(2)}</span>
-      </div>
-      <p className="text-xs text-secondary-200 pt-1">
-        Pay the full amount online, or choose to prebook with just 30% (Rs. {advance.toFixed(2)}) on the next screen.
-      </p>
+      {showAuthGate && <AuthGate onClose={() => setShowAuthGate(false)} onOAuthStart={persistForOAuth} />}
+      <LocalizationProvider dateAdapter={AdapterDayjs}>
+        <DatePickerModal isOpen={showDatePicker} onClose={() => setShowDatePicker(false)} value={date} onChange={setDate} />
+        <TimePickerModal isOpen={showTimePicker} onClose={() => setShowTimePicker(false)} value={startTime} onChange={setStartTime} />
+      </LocalizationProvider>
     </div>
   )
 }

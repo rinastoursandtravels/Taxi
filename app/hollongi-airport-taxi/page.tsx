@@ -247,7 +247,6 @@ export default function HollongiAirportTaxiPage() {
                 {[
                   { href: '/donyi-polo-airport-taxi', label: 'Donyi Polo Airport Taxi' },
                   { href: '/itanagar-airport-taxi', label: 'Itanagar Airport Taxi' },
-                  { href: '/hourly-taxi-itanagar', label: 'Hourly Taxi Itanagar' },
                   { href: '/itanagar-tours', label: 'Itanagar Tours' },
                   { href: '/arunachal-tours', label: 'Arunachal Tours' },
                 ].map(({ href, label }) => (
