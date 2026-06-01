@@ -219,7 +219,7 @@ export async function POST(request: NextRequest) {
         destinationName = dest?.name || ''
       } else if (booking.tour_package_id) {
         const { data: tour } = await supabaseAdmin
-          .from('tours')
+          .from('tour_packages')
           .select('name')
           .eq('id', booking.tour_package_id)
           .single()

@@ -4,11 +4,26 @@ All notable changes to TaxiHollongi will be documented in this file.
 
 ---
 
+## [2026-06-01]
+
+**Author:** Yami
+
+### Changes
+- fix: polish UI
+
+## [2026-05-31]
+
+**Author:** Yami
+
+### Changes
+- v2 -> v3 transition init
+
 ## [2026-05-28]
 
 **Author:** Yami
 
 ### Changes
+- update: Admin car suggestions
 - update: minor - destination name in bookings and search
 - fix: minor
 

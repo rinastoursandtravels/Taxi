@@ -148,7 +148,7 @@ export async function POST(request: Request) {
         const { data: dest } = await supabaseAdmin.from('destinations').select('name').eq('id', booking.destination_id).single()
         destinationName = dest?.name || ''
       } else if (booking.tour_package_id) {
-        const { data: tour } = await supabaseAdmin.from('tours').select('name').eq('id', booking.tour_package_id).single()
+        const { data: tour } = await supabaseAdmin.from('tour_packages').select('name').eq('id', booking.tour_package_id).single()
         destinationName = tour?.name || ''
       }
     }

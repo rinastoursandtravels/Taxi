@@ -87,8 +87,8 @@ function PaymentContent() {
                 destination: bookingData.destination,
                 tourPackageName: bookingData.tourName,
                 pickupDate: bookingData.date,
-                pickupTime: bookingData.time,
-                carType: bookingData.carType,
+                pickupTime: bookingData.startTime || bookingData.time,
+                carType: bookingData.carType || bookingData.car,
               }),
             })
             const verifyData = await verifyResponse.json()

@@ -427,6 +427,41 @@ export default function MyBookings() {
     }
   }
 
+  const resolveTripDetailsForInvoice = async (booking: Booking): Promise<{ destination?: string; tourPackageName?: string }> => {
+    try {
+      if (booking.booking_type === 'tour' && booking.tour_package_id) {
+        const toursRes = await fetch('/api/tours', { method: 'GET' })
+        if (toursRes.ok) {
+          const toursData = await toursRes.json()
+          const matchedTour = (toursData?.tours || []).find((tour: { id: string; name: string }) => tour.id === booking.tour_package_id)
+          if (matchedTour?.name) {
+            return { tourPackageName: matchedTour.name }
+          }
+        }
+      }
+
+      if (booking.booking_type !== 'tour' && booking.destination_id) {
+        const destinationsRes = await fetch('/api/destinations', { method: 'GET' })
+        if (destinationsRes.ok) {
+          const destinationsData = await destinationsRes.json()
+          const matchedDestination = (destinationsData?.destinations || []).find(
+            (destination: { id: string; name: string }) => destination.id === booking.destination_id
+          )
+          if (matchedDestination?.name) {
+            return { destination: matchedDestination.name }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Unable to resolve trip label for invoice:', error)
+    }
+
+    return {
+      destination: booking.booking_type !== 'tour' ? (booking.destination_id || undefined) : undefined,
+      tourPackageName: booking.booking_type === 'tour' ? (booking.tour_package_id || undefined) : undefined,
+    }
+  }
+
   const handleDownloadInvoice = async (booking: Booking) => {
     const bookingKey = booking.booking_id || booking.id
     setDownloadingInvoiceId(booking.id)
@@ -442,6 +477,7 @@ export default function MyBookings() {
       const isFullPay = payment.payment_type === 'full'
       const onlineRecord = (payment.payment_records ?? []).find((r: { txn_type: string; invoice_number?: string | null }) => r.txn_type === 'online')
       const invoiceNumber = onlineRecord?.invoice_number || `INV-${bookingKey}-${Date.now()}`
+      const tripDetails = await resolveTripDetailsForInvoice(booking)
       const invoiceData: InvoiceData = {
         bookingId: bookingKey,
         date: new Date().toISOString(),
@@ -449,6 +485,8 @@ export default function MyBookings() {
         userEmail: booking.user_email || '-',
         userPhone: booking.phone || '-',
         bookingType: booking.booking_type === 'tour' ? 'tour' : 'taxi',
+        destination: tripDetails.destination,
+        tourPackageName: tripDetails.tourPackageName,
         pickupLocation: 'Inside the Arrival Hall, beside the Exit Gate, Donyi Polo Airport, Hollongi, Itanagar',
         pickupDate: booking.start_datetime,
         pickupTime: formatTime(booking.start_datetime),
@@ -585,7 +623,23 @@ export default function MyBookings() {
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-1 md:mb-1.5 pb-1.5 md:pb-2 border-b border-primary-800">
                         <div>
                           <h3 className="text-base md:text-lg font-black text-white mb-0.5">{bookingTypeLabel}</h3>
-                          <p className="text-gray-500 font-mono text-[11px] md:text-xs truncate max-w-[220px] md:max-w-none">{booking.booking_id || booking.id}</p>
+                          <p className="text-gray-500 font-mono text-[11px] md:text-xs truncate max-w-[220px] md:max-w-none">
+                            {booking.booking_id || booking.id}
+                          </p>
+                          {booking.booking_status === 'confirmed' && (
+                            <div className={`mt-1 inline-flex w-fit max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] md:text-[11px] font-semibold leading-tight shadow-[0_0_0_1px_rgba(255,218,0,0.1)] ${
+                              assignment
+                                ? 'border-green-500/40 bg-green-500/15 text-green-200'
+                                : 'border-secondary-500/40 bg-secondary-500/15 text-secondary-200'
+                            }`}>
+                              <Clock size={12} className={`shrink-0 ${assignment ? 'text-green-300' : 'text-secondary-300'}`} />
+                              <span className="tracking-[0.01em]">
+                                {assignment
+                                  ? 'Driver details have been sent to your email'
+                                  : 'Driver details will be sent to your email shortly'}
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 mt-1.5 md:mt-0">
                           <span className={`px-2.5 py-1 rounded-full font-semibold text-[11px] md:text-xs ${statusBadge.className}`}>

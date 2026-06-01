@@ -19,6 +19,51 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const enrichPaymentResponse = async (paymentRow: any, canonicalBookingId: string | null) => {
+      const { data: records } = await getPaymentRecordsByPaymentId(paymentRow.id)
+
+      const resolvedBookingId = canonicalBookingId || paymentRow.booking_id || null
+      let bookingDetails: any = null
+      let destinationName: string | null = null
+      let tourName: string | null = null
+
+      if (resolvedBookingId) {
+        const { data: booking } = await supabaseAdmin
+          .from('bookings')
+          .select('id, booking_id, booking_type, user_name, user_email, phone, passenger_count, start_datetime, pickup_date, pickup_time, destination_id, tour_package_id, car_model')
+          .eq('booking_id', resolvedBookingId)
+          .single()
+
+        bookingDetails = booking || null
+
+        if (booking?.destination_id) {
+          const { data: destination } = await supabaseAdmin
+            .from('destinations')
+            .select('name')
+            .eq('id', booking.destination_id)
+            .single()
+          destinationName = destination?.name || null
+        }
+
+        if (booking?.tour_package_id) {
+          const { data: tour } = await supabaseAdmin
+            .from('tour_packages')
+            .select('name')
+            .eq('id', booking.tour_package_id)
+            .single()
+          tourName = tour?.name || null
+        }
+      }
+
+      return {
+        ...paymentRow,
+        payment_records: records ?? [],
+        booking_details: bookingDetails,
+        destination_name: destinationName,
+        tour_name: tourName,
+      }
+    }
+
     // Try direct lookup first (covers rows where payments.booking_id equals provided value)
     const { data: directPayment, error: directError } = await supabaseAdmin
       .from('payments')
@@ -27,8 +72,8 @@ export async function GET(request: NextRequest) {
       .single()
 
     if (!directError && directPayment) {
-      const { data: records } = await getPaymentRecordsByPaymentId(directPayment.id)
-      return Response.json({ ...directPayment, payment_records: records ?? [] }, { status: 200 })
+      const payload = await enrichPaymentResponse(directPayment, directPayment.booking_id || null)
+      return Response.json(payload, { status: 200 })
     }
 
     // Fallback: bookingId may be DB UUID (bookings.id) while payment row stores bookings.booking_id
@@ -66,8 +111,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { data: fallbackRecords } = await getPaymentRecordsByPaymentId(fallbackPayment.id)
-    return Response.json({ ...fallbackPayment, payment_records: fallbackRecords ?? [] }, { status: 200 })
+    const payload = await enrichPaymentResponse(fallbackPayment, booking.booking_id)
+    return Response.json(payload, { status: 200 })
   } catch (error) {
     console.error('Error in get-payment route:', error)
     return Response.json(

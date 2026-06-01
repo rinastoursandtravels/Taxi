@@ -382,7 +382,7 @@ export default function BookTaxi() {
     }
   }
 
-  if (isLoading) return <div className="min-h-screen bg-primary-950" />
+  if (isLoading) return <div className="h-[100dvh] min-h-[100svh] bg-primary-950" />
 
   // Modern step indicator helper
   const StepIndicator = () => {
@@ -708,24 +708,24 @@ export default function BookTaxi() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col overflow-hidden bg-primary-950">
+    <div className="flex h-[100dvh] min-h-[100svh] flex-col overflow-hidden bg-primary-950 pt-[72px] md:pt-[84px]">
       <Header />
-      <main className="mt-[72px] h-[calc(100vh-72px)] overflow-hidden bg-[radial-gradient(circle_at_top,rgba(255,214,10,0.08),transparent_24%),linear-gradient(180deg,#1a120f_0%,#140f0d_100%)] md:mt-[84px] md:h-[calc(100vh-84px)]">
-        <div className="container mx-auto h-full max-w-4xl px-3 pt-[5px] pb-3 md:px-4 md:pt-[5px] md:pb-4">
-          <div className="flex h-full max-w-full flex-col gap-4">
+      <main className="min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_top,rgba(255,214,10,0.08),transparent_24%),linear-gradient(180deg,#1a120f_0%,#140f0d_100%)]">
+        <div className="container mx-auto h-full max-w-4xl px-3 pt-1 pb-[max(4px,env(safe-area-inset-bottom))] md:px-4 md:pt-[5px] md:pb-4">
+          <div className="flex h-full max-w-full flex-col gap-2 md:gap-4">
             {/* Step Indicator */}
             <StepIndicator />
 
             {/* Main Content Form */}
-            <form onSubmit={step === 'confirm' ? onSubmit : onNext} className="flex min-h-0 flex-1 flex-col gap-4">
+            <form onSubmit={step === 'confirm' ? onSubmit : onNext} className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-2 md:gap-4">
               {/* Content Area */}
-              <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-md p-5 md:p-6 shadow-xl">
-                <div className="h-full min-h-0 overflow-y-auto pr-2 scrollbar-thin-modern">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-3 shadow-xl backdrop-blur-md md:p-6">
+                <div className="h-full min-h-0 flex-1 overflow-y-auto pr-1 pb-1 scrollbar-thin-modern sm:pr-2">
                   {step === 'route' && (
-                    <div className="flex flex-col gap-4 h-full min-h-0">
+                    <div className="flex h-full min-h-0 flex-col gap-2.5 md:gap-4">
                       {/* Fixed Passengers Section */}
                       <div>
-                        <label className="flex items-center gap-2 text-lg font-bold text-white mb-2">
+                        <label className="mb-2 flex items-center gap-2 text-base font-bold text-white sm:text-lg">
                           <Users className="h-5 w-5 text-secondary-300" />
                           How Many Passengers?
                         </label>
@@ -748,13 +748,13 @@ export default function BookTaxi() {
                       </div>
 
                       {/* Scrollable Destination Section */}
-                      <div className="flex flex-col gap-2 min-h-0 flex-1">
+                      <div className="flex min-h-0 flex-1 flex-col gap-2">
                         <div className="flex items-center justify-between gap-2">
-                          <label className="flex items-center gap-2 text-lg font-bold text-white">
+                          <label className="flex items-center gap-2 whitespace-nowrap text-base font-bold text-white sm:text-lg">
                             <MapPin className="h-5 w-5 text-secondary-300" />
                             Select Destination
                           </label>
-                          <div className="relative min-w-[140px] sm:min-w-[170px]">
+                          <div className="relative min-w-[120px] sm:min-w-[170px]">
                             <button
                               type="button"
                               onClick={() => setShowDestinationSortMenu((v) => !v)}
@@ -816,7 +816,7 @@ export default function BookTaxi() {
                             <p className="text-gray-300">Loading destinations...</p>
                           </div>
                         ) : (
-                          <div className="grid content-start auto-rows-max gap-3 overflow-y-auto pr-2 scrollbar-thin-modern min-h-0 flex-1">
+                          <div className="grid min-h-0 flex-1 content-start auto-rows-max gap-3 overflow-y-auto pr-1 scrollbar-thin-modern sm:pr-2">
                             {filteredDestinations.map((d) => (
                               <button
                                 key={d.id}
@@ -1098,12 +1098,12 @@ export default function BookTaxi() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3">
+              <div className="-mx-1 flex gap-3 border-t border-white/10 bg-[linear-gradient(180deg,rgba(20,15,13,0.08)_0%,rgba(20,15,13,0.94)_22%,rgba(20,15,13,0.99)_100%)] px-1 pt-2 pb-[max(4px,env(safe-area-inset-bottom))] backdrop-blur-xl">
                 {step !== 'route' && (
                   <button
                     type="button"
                     onClick={() => setStep(AIRPORT_STEPS[AIRPORT_STEPS.indexOf(step) - 1])}
-                    className="flex items-center justify-center gap-2 flex-1 rounded-xl border-2 border-white/20 bg-white/[0.05] px-4 py-3 md:py-4 text-sm md:text-base font-bold text-white hover:bg-white/[0.08] hover:border-white/30 transition-all duration-200"
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-white/20 bg-white/[0.05] px-4 py-3 text-sm font-bold text-white transition-all duration-200 hover:border-white/30 hover:bg-white/[0.08] md:py-4 md:text-base"
                   >
                     <ChevronLeft className="h-5 w-5" />
                     <span className="hidden sm:inline">Previous</span>

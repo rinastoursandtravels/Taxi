@@ -1,8 +1,8 @@
 # Rina's Tours and Travels — Complete Application Documentation
 
 **Product:** Rina's Tours and Travels (RT&T)
-**Version:** 2.0
-**Last Updated:** 2026-05-27
+**Version:** 2.1
+**Last Updated:** 2026-06-01
 **Branch:** v2-stable
 
 
@@ -39,9 +39,8 @@ The business offers three product lines:
 
 | Line | Description |
 |------|-------------|
-| **Airport taxi** | Point-to-point transfers between Donyi Polo Airport (Hollongi) and destinations such as Itanagar, Naharlagun, Ziro, Bomdila, Tawang, etc. Distance-based pricing. |
+| **Airport taxi** | Point-to-point transfers between Donyi Polo Airport (Hollongi) and destinations such as Itanagar, Naharlagun, Ziro, Bomdila, Tawang, etc. Fixed pricing by destination and car model. |
 | **Tour packages** | Fixed-price curated multi-hour / multi-day tours with a predefined itinerary, vehicle, and passenger cap. |
-| **Hourly taxi** | Time-based ("disposal") taxi hire within and around Itanagar — billed per hour or per day. |
 
 The digital platform — **Rina's Tours and Travels (RT&T)** — provides a customer-facing booking website and an internal operations dashboard.
 
@@ -70,11 +69,11 @@ These rules are enforced by the system and must be preserved by any future chang
 | BR-04 | The 30% advance is computed as `Math.round(total × 0.30 × 100) / 100`; the cash portion is `total − advance` (avoids floating-point drift). |
 | BR-05 | A booking is only marked `confirmed` after the Razorpay payment **signature is verified server-side** (HMAC-SHA256). |
 | BR-06 | A customer may cancel a booking only if the trip start is **more than 24 hours away** (see [`canCancelBooking`](#76-utility-functions)). Admins may cancel at any time. |
-| BR-07 | When **conflict control is ON**, airport/hourly customer bookings cannot reserve a model whose active capacity is exhausted. Tour bookings remain bookable but show an immediate vehicle-availability warning. Admins may override specific-car assignment conflicts, but the override is recorded and remains visible in the scanner. Overlap = `existing.start < new.end AND existing.end > new.start`. |
+| BR-07 | When **conflict control is ON**, taxi customer bookings cannot reserve a model whose active capacity is exhausted. Tour bookings remain bookable but show an immediate vehicle-availability warning. Admins may override specific-car assignment conflicts, but the override is recorded and remains visible in the scanner. Overlap = `existing.start < new.end AND existing.end > new.start`. |
 | BR-08 | Bookings left in `pending` (unpaid) for more than 24 hours are deleted automatically by a daily cron job. |
 | BR-09 | A user may submit **at most one review per item** (`UNIQUE(user_email, reviewable_type, reviewable_id)`). |
 | BR-10 | Ratings are integers from **1 to 5** (DB `CHECK` constraint). |
-| BR-11 | Tour bookings cannot exceed the tour's `max_passengers`; airport/hourly bookings cannot exceed the chosen car model's `capacity`. |
+| BR-11 | Tour bookings cannot exceed the tour's `max_passengers`; taxi bookings cannot exceed the chosen car model's `capacity`. |
 | BR-12 | All monetary amounts are stored and processed in **INR**. Razorpay amounts are expressed in **paise** (× 100). |
 | BR-13 | Customers see car **models** (name, class, capacity, price, available count) — never number plates, driver names, or specific car IDs — until after a vehicle is assigned by an admin. |
 
@@ -91,8 +90,7 @@ These rules are enforced by the system and must be preserved by any future chang
 
 The platform itself charges no commission — it is an owned channel. Revenue is the trip fare:
 
-- **Airport taxi:** `distance_km × cars.per_km_charge` for the chosen car class; distance is stored per destination row (all distances measured FROM Hollongi Airport).
-- **Hourly taxi:** `no_of_hours × cars.per_hr_charge` for the chosen car class.
+- **Airport taxi:** fixed fare from `destination_car_fares.fixed_fare`, keyed by `(destination_id, model_name)`.
 - **Tours:** fixed `price` per `tour_packages` row, independent of distance.
 
 Cash collected at the airport (the 70% balance on partial bookings) is reconciled in the admin dashboard by marking the cash as collected, which records the collector's name and timestamp.
@@ -121,7 +119,7 @@ Cash collected at the airport (the 70% balance on partial bookings) is reconcile
 
 ### 2.1 Product Vision
 
-A mobile-first web application that lets travellers in Arunachal Pradesh book airport taxis, hourly taxis, and curated tours from Rina's Tours and Travels in under two minutes — and gives the operator a single dashboard to run the entire business.
+A mobile-first web application that lets travellers in Arunachal Pradesh book airport taxis and curated tours from Rina's Tours and Travels in under two minutes — and gives the operator a single dashboard to run the entire business.
 
 ### 2.2 User Personas
 
@@ -135,10 +133,10 @@ A mobile-first web application that lets travellers in Arunachal Pradesh book ai
 - Wants itinerary detail, photos, reviews, and the ability to lock a date with a small advance.
 - Values: information depth, social proof (reviews), flexible 30% advance.
 
-**Persona C — "Local Resident"**
-- Needs a car for a few hours / a day within Itanagar (errands, events).
-- Wants simple hourly pricing and a known vehicle class.
-- Values: simplicity, predictable per-hour cost.
+**Persona C — "Route Customer"**
+- Needs a dependable pre-priced transfer from Hollongi Airport to a known destination.
+- Wants a quick destination search, visible trip duration, and easy comparison of available car models.
+- Values: clarity, speed, predictable final fare.
 
 **Persona D — "Operator / Admin"**
 - Runs Rina's Tours; non-technical but comfortable with web apps.
@@ -163,47 +161,43 @@ Each feature lists representative user stories with acceptance criteria (AC).
 
 #### F-02 — Airport Taxi Booking
 - *As an arriving traveller, I want to book a taxi from the airport to my destination for a date & time.*
-  - AC: 5-step flow — **Contact → Route → Date & Time → Car → Confirm**; destinations come from the `destinations` table (each with `distance_km`, `estimated_duration_minutes`); only car models with ≥ 1 free unit for the window are shown; fare breakdown shown before confirm; passenger count ≤ chosen model `capacity`.
+  - AC: 5-step flow — **Route → Schedule → Car → Contact → Review**; destinations come from the `destinations` table (each with `estimated_duration_minutes` and `description`); customers can search destinations and sort by name or duration; only car models with ≥ 1 free unit for the window are shown; car cards expose model, class, capacity, fixed fare, and available count; fare breakdown shows both full payment and 30% advance option before confirm; passenger count ≤ chosen model `capacity`.
 
-#### F-03 — Hourly Taxi Booking
-- *As a customer, I want to hire a car for N hours/days within Itanagar.*
-  - AC: 5-step flow — **Contact → Passengers & Date → Time & Duration → Car → Confirm**; duration entered as days + hours; price = per-hour/per-day rate × duration; availability checked over the full window.
-
-#### F-04 — Tour Package Booking
+#### F-03 — Tour Package Booking
 - *As a tourist, I want to browse tours and book one for a date.*
   - AC: Tour list and category landing pages (`/arunachal-tours`, `/itanagar-tours`); tour detail page shows description, itinerary, highlights, multi-image gallery, average rating & reviews; booking checks availability and `max_passengers`; price is fixed per tour.
 
-#### F-05 — Payment Processing
+#### F-04 — Payment Processing
 - *As a customer, I want to pay 30% now and 70% cash to the driver, or pay 100% now.*
-  - AC: Two buttons — **Partial (30% online)** and **Full (100% online)**; Razorpay checkout (company shown as "Rina's Tours and Travels"); server creates the Razorpay order, then verifies the signature on callback; on success the booking becomes `confirmed`, a payment record is written, an invoice number is generated, and a confirmation email is sent.
+  - AC: The booking review clearly explains both payment choices — **Full payment online** or **30% advance online + 70% cash at airport counter / ride time**; Razorpay checkout (company shown as "Rina's Tours and Travels"); server creates the Razorpay order, then verifies the signature on callback; on success the booking becomes `confirmed`, a payment record is written, an invoice number is generated, and a confirmation email is sent.
 
-#### F-06 — Invoice
+#### F-05 — Invoice
 - *As a customer, I want to download a PDF invoice for my booking.*
   - AC: PDF generated client-side (jsPDF) with company header, booking ID, customer & trip details, and payment breakdown (online paid / cash due / total); available from "Booking Confirmed" and "My Bookings".
 
-#### F-07 — My Bookings & Cancellation
+#### F-06 — My Bookings & Cancellation
 - *As a customer, I want to see all my bookings with status and continue paying for pending ones.*
   - AC: `/bookings` lists bookings by email with status badges; pending bookings have a "Continue to Pay" action; "Cancel" available only > 24 h before trip start; cancellation creates a request the admin processes.
 
-#### F-08 — Reviews & Ratings
+#### F-07 — Reviews & Ratings
 - *As a customer, I want to rate a completed trip/tour 1–5 stars with a title & comment.*
   - AC: One review per user per item; rating 1–5; review appears on tour pages; admins can hide a review.
 
-#### F-09 — Admin Dashboard
+#### F-08 — Admin Dashboard
 - *As an admin, I want to manage everything from one place.*
   - AC: Tabs — **Overview, Bookings, Cars, Destinations, Tours, Analytics, Misc**; JWT-protected; mobile responsive; dark mode toggle. See [§12](#12-admin-dashboard-reference).
 
-#### F-10 — Email Notifications
+#### F-09 — Email Notifications
 - *As a customer, I want a confirmation email; as a driver, I want an assignment email.*
   - AC: Booking confirmation on payment verified; driver notification on vehicle assignment; cancellation email on cancellation processed; delivered via Resend (SMTP fallback available).
 
-#### F-11 — Conflict Control
+#### F-10 — Conflict Control
 - *As an admin, I want the system to prevent double-booking a vehicle — but I want to be able to turn it off.*
-  - AC: `app_settings.conflict_control_enabled` toggle; when ON, airport/hourly model holds are blocked server-side, tour model conflicts become warnings, and admin assignment overlaps require an explicit override. When OFF, availability checks are advisory and the admin manages conflicts manually from the Misc tab.
+  - AC: `app_settings.conflict_control_enabled` toggle; when ON, taxi model holds are blocked server-side, tour model conflicts become warnings, and admin assignment overlaps require an explicit override. When OFF, availability checks are advisory and the admin manages conflicts manually from the Misc tab.
 
-#### F-12 — SEO Landing Pages
+#### F-11 — SEO Landing Pages
 - *As the business, I want dedicated pages to rank for local search.*
-  - AC: Static-content pages: `/hollongi-airport-taxi`, `/donyi-polo-airport-taxi`, `/itanagar-airport-taxi`, `/hourly-taxi-itanagar`, `/arunachal-tours`, `/itanagar-tours`; semantic HTML + Next.js metadata; legacy `/airport-taxi-itanagar` permanently redirects to `/itanagar-airport-taxi`.
+  - AC: Static-content pages: `/hollongi-airport-taxi`, `/donyi-polo-airport-taxi`, `/itanagar-airport-taxi`, `/arunachal-tours`, `/itanagar-tours`; semantic HTML + Next.js metadata; legacy `/airport-taxi-itanagar` permanently redirects to `/itanagar-airport-taxi`.
 
 ### 2.4 Out of Scope (Current Version)
 
@@ -219,13 +213,11 @@ flowchart TD
     D --> E{Choose service}
     B -- Yes --> E
 
-    E -- Airport taxi --> F1[Contact → Passangers/Route → Date/Time]
-    E -- Hourly taxi --> F2[Contact → Passengers/Date → Time/Duration]
-    E -- Tour package --> F3[Browse tours → Pick date & passengers]
+    E -- Airport taxi --> F1[Route → Schedule → Car → Contact → Review]
+    E -- Tour package --> F2[Browse tours → Pick date & passengers]
 
-    F1 --> G[System: GET available car models for window]
+    F1 --> G[System: GET available car models for destination + window]
     F2 --> G
-    F3 --> G
 
     G --> H{Any model available?}
     H -- No --> I[Show no availability]
@@ -269,15 +261,15 @@ flowchart TD
 
 | ID | Requirement |
 |----|-------------|
-| FR-BOOK-1 | The system shall support three booking types: `airport`, `tour`, `hourly`. |
+| FR-BOOK-1 | The system shall support two booking types: `taxi` and `tour`. |
 | FR-BOOK-2 | The system shall require an authenticated user before creating a booking. |
 | FR-BOOK-3 | The system shall generate a unique UUID `booking_id` for every booking. |
-| FR-BOOK-4 | For airport bookings, the system shall capture source/destination (from `destinations`), date, time, and passenger count. |
-| FR-BOOK-5 | For hourly bookings, the system shall capture duration (days + hours), start date/time, and passenger count. |
+| FR-BOOK-4 | For taxi bookings, the system shall capture destination (from `destinations`), date, time, and passenger count. |
+| FR-BOOK-5 | For taxi bookings, the system shall derive the booking window end time from the selected destination's `estimated_duration_minutes`, doubled internally to reserve the car for the return-to-base period. |
 | FR-BOOK-6 | For tour bookings, the system shall capture the selected `tour_package_id`, date, and passenger count (≤ `max_passengers`). |
-| FR-BOOK-7 | The system shall display only car **models** that have ≥ 1 available unit for the requested window (`GET /api/cars/available-models`). |
+| FR-BOOK-7 | The system shall display only car **models** that have ≥ 1 available unit for the requested destination/time window (`GET /api/cars/available-models`). |
 | FR-BOOK-8 | The system shall display the full fare breakdown before booking confirmation. |
-| FR-BOOK-9 | When conflict control is ON, the system shall block airport/hourly booking creation if the selected model has no free unit for the window; tour bookings shall remain allowed with a warning; admin assignment overlaps shall be allowed only as recorded overrides. |
+| FR-BOOK-9 | When conflict control is ON, the system shall block taxi booking creation if the selected model has no free unit for the window; tour bookings shall remain allowed with a warning; admin assignment overlaps shall be allowed only as recorded overrides. |
 | FR-BOOK-10 | The system shall create new bookings with `booking_status = 'pending'`. |
 | FR-BOOK-11 | The system shall allow a customer to request cancellation only if the trip start is > 24 h away; admins may cancel any time. |
 | FR-BOOK-12 | The system shall delete `pending` bookings older than 24 h via the daily `cleanup-pending` cron. |
@@ -440,14 +432,14 @@ flowchart LR
 | Vehicle Assignment | Admin assigns a specific car + driver to a booking | `app/api/bookings/assign-vehicle`, `/update-assignment`, `/get-assignments`, `/user-assignments` |
 | Payment Processor | Razorpay orders & verification; cash collection; refunds | `app/api/payment/*`, `lib/payment.ts`, `lib/payment-db.ts`, `lib/payment-utils.ts` |
 | Tour Management | Tour package CRUD + images + availability | `app/api/tours/*`, `lib/db.ts`, `lib/database.ts` |
-| Destination & Pricing | Destination CRUD; pricing rules; hourly rates | `app/api/destinations/*`, `lib/database.ts` |
+| Destination & Pricing | Destination CRUD; destination-wise fixed-fare rules | `app/api/destinations/*`, `app/api/admin/destination-fares/*`, `lib/database.ts` |
 | Notification Service | Confirmation / driver / cancellation emails | `lib/notifications.ts`, `lib/resend-notifications.ts` |
 | Invoice Generator | Client-side PDF invoice | `lib/invoice.ts` |
 | Review System | Submit & display ratings | `app/api/reviews/*`, `lib/reviews.ts`, `components/ReviewForm.tsx`, `components/ReviewCard.tsx` |
 | Admin Dashboard | One-stop operations UI (7 tabs) | `app/admin/page.tsx` |
 | Conflict Control | Toggle-gated double-booking prevention + scanner | `app/api/admin/settings`, `app/api/admin/conflicts`, `app_settings` table |
 | Cleanup Cron | Delete stale `pending` bookings daily | `app/api/admin/cleanup-pending`, `vercel.json` |
-| SEO Pages | Local-search landing pages | `app/hollongi-airport-taxi`, `/donyi-polo-airport-taxi`, `/itanagar-airport-taxi`, `/hourly-taxi-itanagar`, `/arunachal-tours`, `/itanagar-tours` |
+| SEO Pages | Local-search landing pages | `app/hollongi-airport-taxi`, `/donyi-polo-airport-taxi`, `/itanagar-airport-taxi`, `/arunachal-tours`, `/itanagar-tours` |
 
 ### 5.2 Module Interaction Diagram
 
@@ -559,12 +551,11 @@ Every protected request: header  Authorization: Bearer <token>
 ```
 POST /api/bookings/create
 Input (varies by type):
-  booking_type ∈ { 'airport', 'tour', 'hourly' }
+  booking_type ∈ { 'taxi', 'tour' }
   user_name, user_email, phone, passenger_count
   start_datetime, end_datetime
-  destination_id?      (airport)
+  destination_id?      (taxi)
   tour_package_id?     (tour)
-  no_of_hours?         (hourly)
   car_model, amount_total
 
 Steps:
@@ -572,10 +563,10 @@ Steps:
   2. read conflict_control_enabled from app_settings
   3. if enabled: check active pending/confirmed holds
         overlap ⇔ existing.start < new.end AND existing.end > new.start
-        → airport/hourly with no free selected model: 409 Conflict
+        → taxi with no free selected model: 409 Conflict
         → tour with no free preferred model: create booking, return warning
   4. INSERT INTO bookings (... , booking_status = 'pending')
-  5. airport/hourly race guard: after insert, verify this booking is inside model quota
+  5. taxi race guard: after insert, verify this booking is inside model quota
   6. → { success: true, booking_id, conflict_warning? }
 ```
 
@@ -659,7 +650,7 @@ For each model:
   unassigned_count = active unassigned bookings requesting that model
   available_count  = active physical cars of model - assigned_count - unassigned_count
 
-Only models with available_count > 0 are returned to airport/hourly customers.
+Only models with available_count > 0 are returned to taxi customers.
 Tour availability uses the same math, but an unavailable preferred model returns
 a warning instead of blocking booking.
 ```
@@ -669,7 +660,7 @@ Users only ever see the **model-level** projection. The number plate, driver, an
 ### 6.5 Conflict Control System
 
 - Stored as `app_settings.conflict_control_enabled` (text `'true'`/`'false'`, default `'true'`).
-- **ON** - airport/hourly booking creation rejects exhausted models with `409`; tour booking remains allowed but returns a vehicle warning; admin same-car overlaps are allowed only as recorded overrides.
+- **ON** - taxi booking creation rejects exhausted models with `409`; tour booking remains allowed but returns a vehicle warning; admin same-car overlaps are allowed only as recorded overrides.
 - **OFF** - customer availability lists all active cars; admin manages conflicts manually. The Misc tab's **conflict scanner** (`GET /api/admin/conflicts`) reports two classes:
   - **Assignment conflicts** - the same specific car committed to overlapping windows, or one booking carrying multiple overlapping vehicle assignments.
   - **Model conflicts** - true simultaneous demand for a model exceeds active physical cars. Assigned bookings consume the assigned car's actual model; unassigned bookings consume their requested `bookings.car_model`.
@@ -774,7 +765,7 @@ SMS / WhatsApp are placeholders only (currently console-logged).
 | `validateEmail` / `validatePhoneNumber` / `validateName` | `(v: string) => boolean` | quick boolean checks (stricter checks live in `lib/validation.ts`) |
 | `calculateAdvancePayment` | `(total: number) => number` | 30% of total |
 | `calculateRemainingPayment` | `(total: number) => number` | 70% of total |
-| `calculateTotalPrice` | `(basePrice: number, hours?: number, days?: number) => number` | hourly/daily totals |
+| `calculateTotalPrice` | `(basePrice: number, hours?: number, days?: number) => number` | generic price helper retained in utilities |
 | `generateBookingId` | `() => string` | UUID v4 string |
 | `generateInvoiceNumber` | `() => string` | sequential-style invoice number |
 | `canCancelBooking` | `(bookingDate: string) => boolean` | true if > 24 h before trip |
@@ -813,7 +804,7 @@ SMS / WhatsApp are placeholders only (currently console-logged).
 
 ## 8. Entity-Relationship Diagram (ERD)
 
-> All 10 tables are defined in `sql/` (see `sql/README.md` for execution order). The ERD below reflects the exact columns present in those files.
+> The active application tables are defined in `sql/` (see `sql/README.md` for execution order). The ERD below reflects the current schema used by the app.
 
 **Diagram A — Core Transactions** (bookings, payments, vehicle assignments)
 
@@ -822,16 +813,15 @@ erDiagram
     BOOKINGS {
         uuid    id               PK
         uuid    booking_id       UK
-        string  booking_type        "airport | hourly | tour"
+        string  booking_type        "taxi | tour"
         string  user_name
         string  user_email
         string  phone
         int     passenger_count
         timestamp start_datetime
         timestamp end_datetime
-        uuid    destination_id   FK  "airport bookings only → DESTINATIONS"
+        uuid    destination_id   FK  "taxi bookings only → DESTINATIONS"
         uuid    tour_package_id  FK  "tour bookings only → TOUR_PACKAGES"
-        numeric no_of_hours         "hourly bookings only"
         string  car_model           "chosen model name"
         numeric amount_total
         string  booking_status      "pending|confirmed|completed|cancelled"
@@ -896,14 +886,10 @@ erDiagram
         string  model_name
         string  class               "Economy|Premium|Luxury|Group"
         string  number_plate     UK
-        numeric per_km_charge       "used for airport pricing"
-        numeric per_hr_charge       "used for hourly pricing"
         int     capacity
         string  driver_name
         string  driver_phone
         string  driver_email
-        string  driver_license_number
-        date    driver_license_expiry
         boolean driver_verified
         boolean is_active
         timestamp created_at
@@ -922,7 +908,7 @@ erDiagram
 erDiagram
     BOOKINGS {
         uuid    booking_id  PK
-        string  booking_type   "airport | hourly | tour"
+        string  booking_type   "taxi | tour"
         uuid    destination_id FK
         uuid    tour_package_id FK
     }
@@ -930,7 +916,6 @@ erDiagram
         uuid    id               PK
         string  name             UK
         string  description
-        numeric distance_km         "km FROM Hollongi Airport"
         int     estimated_duration_minutes
         boolean is_active
         timestamp created_at
@@ -998,7 +983,7 @@ erDiagram
 | `bookings` | `payment_records` | 1 : N | `payment_records.booking_id` | denormalised text back-reference |
 | `bookings` | `vehicle_assignments` | 1 : N | `vehicle_assignments.booking_id` | usually one; reassignment adds rows |
 | `cars` | `vehicle_assignments` | 1 : N | `vehicle_assignments.car_id` | nullable FK with `ON DELETE SET NULL`; historical assignments remain after car hard-delete |
-| `destinations` | `bookings` | 1 : N | `bookings.destination_id` | **airport bookings only** — FROM Hollongi Airport TO this destination |
+| `destinations` | `bookings` | 1 : N | `bookings.destination_id` | **taxi bookings only** — FROM Hollongi Airport TO this destination |
 | `tour_packages` | `bookings` | 1 : N | `bookings.tour_package_id` | **tour bookings only** |
 | `tour_packages` | `reviews` | 1 : N | polymorphic (`reviewable_type = 'tour'`) | |
 | `bookings` | `reviews` | 1 : N | polymorphic (`reviewable_type = 'taxi_booking'`) | |
@@ -1104,7 +1089,7 @@ flowchart LR
         UC1["Register / Verify email"]
         UC2["Log in / Log out / Change password"]
         UC3["Book airport taxi"]
-        UC4["Book hourly taxi"]
+        UC4["Book fixed-fare taxi"]
         UC5["Book tour package"]
         UC6["Pay online (partial / full)"]
         UC7["Download invoice (PDF)"]
@@ -1142,7 +1127,7 @@ classDiagram
     class Booking {
         +string id
         +string booking_id
-        +string booking_type  "airport|tour|hourly"
+        +string booking_type  "taxi|tour"
         +string user_name
         +string user_email
         +string phone
@@ -1151,7 +1136,6 @@ classDiagram
         +Date end_datetime
         +string destination_id
         +string tour_package_id
-        +int no_of_hours
         +string car_model
         +number amount_total
         +string booking_status  "pending|confirmed|completed|cancelled"
@@ -1205,14 +1189,10 @@ classDiagram
         +string model_name
         +string class
         +string number_plate
-        +number per_km_charge
-        +number per_hr_charge
         +int capacity
         +string driver_name
         +string driver_phone
         +string driver_email
-        +string driver_license_number
-        +Date driver_license_expiry
         +boolean driver_verified
         +boolean is_active
     }
@@ -1233,7 +1213,6 @@ classDiagram
         +string id
         +string name
         +string description
-        +number distance_km
         +int estimated_duration_minutes
         +boolean is_active
     }
@@ -1458,32 +1437,24 @@ flowchart TB
 
 ### 11.1 Airport Taxi Booking
 
-- **Where:** `/book-taxi` (mode = airport).
-- **Flow:** `contact → route → schedule → car → confirm`.
+- **Where:** `/book-taxi`.
+- **Flow:** `route → schedule → car → contact → review`.
 - **Direction:** always **FROM Hollongi Airport (Donyi Polo Airport)** TO a chosen destination. The source is fixed; customers pick their destination from the `destinations` list.
-- **Inputs:** name, phone, email (locked if logged in); destination from `destinations` (carries `distance_km`, `estimated_duration_minutes`, `description`); date; time; passenger count.
-- **Availability:** `GET /api/cars/available-models` with the computed `start`/`end`; only models with a free unit appear, each with `available_count`.
-- **Pricing:** `destination.distance_km × car.per_km_charge`. No separate pricing table — the rate is stored on the `cars` row per car class. The confirm step shows the fare breakdown and payment split.
-- **Constraints:** `passenger_count ≤ car.capacity`; conflict control (if ON) blocks exhausted airport/hourly models while allowing tours with a warning.
+- **Inputs:** passenger count; destination from `destinations` (carries `estimated_duration_minutes`, `description`); date; time; car model; name; phone; email (locked if logged in).
+- **Search & sort:** destination search plus sort by name or duration; car search plus sort by price, name, or capacity.
+- **Availability:** `GET /api/cars/available-models` with `destination_id`, `booking_date`, `start_time`, and derived `end_time`; only models with a free unit appear, each with `available_count`.
+- **Pricing:** `destination_car_fares.fixed_fare` keyed by destination and model. The review step shows the total fare, 30% advance amount, and remaining 70% cash amount.
+- **Constraints:** `passenger_count ≤ car.capacity`; conflict control (if ON) blocks exhausted taxi models while allowing tours with a warning.
 - **Output:** a `pending` booking → `/payment` (data passed via `sessionStorage.bookingData`).
 
-### 11.2 Hourly Taxi Booking
-
-- **Where:** `/book-taxi` (mode = hourly), and SEO entry `/hourly-taxi-itanagar`.
-- **Flow:** `contact → details → schedule → car → confirm`.
-- **Inputs:** name/phone/email; passenger count; date; start time; duration as **days + hours** (helper `formatDuration` renders e.g. `1d 4h`).
-- **Pricing:** `no_of_hours × car.per_hr_charge`. Rate is stored on the `cars` row — no separate hourly-rates table.
-- **Availability:** same overlap check over the full `[start, start+duration]` window.
-- **Output:** `pending` booking → `/payment`.
-
-### 11.3 Tour Package Booking
+### 11.2 Tour Package Booking
 
 - **Where:** `/tours` (catalogue), `/tours/[id]/book`, `/tours/[id]/reviews`; category landings `/arunachal-tours`, `/itanagar-tours`.
 - **Tour detail page:** name, description, `arrival_time`, `duration_hours`, `price`, `max_passengers`, `car_model`, `itinerary`, `highlights[]`, `image_url` + `image_urls[]` gallery, average rating & reviews (`fetchAllTourRatingStats`, `lib/reviews.ts`).
 - **Booking:** select date & passengers (≤ `max_passengers`); availability is checked (tour vehicles are linked into the same conflict system); price is the fixed tour `price`.
 - **Output:** `pending` booking with `tour_package_id` set → `/payment` (data via `sessionStorage.tourBookingData`, `type=tour`).
 
-### 11.4 Payment System
+### 11.3 Payment System
 
 - **Modes:** `partial` (30% online + 70% cash) and `full` (100% online).
 - **Math:** advance `= round(total × 0.30 × 100)/100`; cash `= total − advance` (see `lib/payment-utils.ts`).
@@ -1494,13 +1465,13 @@ flowchart TB
 - **Helper library:** `lib/payment-db.ts` — `calculatePaymentAmounts`, `createPaymentInDB`, `getPaymentByBookingId`, `updatePaymentStatus`, `createPaymentRecord`, `getPaymentRecordsByPaymentId`, `markCashPaymentCollected`.
 - **Test mode:** Razorpay test card `4111 1111 1111 1111` (any future expiry, any CVV); UPI `success@razorpay` / `failure@razorpay`.
 
-### 11.5 Invoice System
+### 11.4 Invoice System
 
 - Client-side PDF (`lib/invoice.ts`, jsPDF + html2canvas) — no server round-trip.
 - Contents: company header, invoice number, date, booking ID, customer block, service block, payment breakdown (online paid / cash due / total), footer.
 - Available from Booking Confirmed and My Bookings; the invoice number originates from `payment_records.invoice_number` written at verification time.
 
-### 11.6 Review System
+### 11.5 Review System
 
 - **Eligibility:** authenticated users; one review per `(user_email, reviewable_type, reviewable_id)` — DB unique index.
 - **Data:** `reviewable_type ∈ {tour, taxi_booking}`, `rating` 1–5 (DB `CHECK`), optional `title`/`comment`, `is_visible` flag.
@@ -1508,27 +1479,26 @@ flowchart TB
 - **Moderation:** admins toggle `is_visible`.
 - **API:** `GET /api/reviews?reviewable_type=&reviewable_id=`, `POST /api/reviews`.
 
-### 11.7 Email Notifications
+### 11.6 Email Notifications
 
 - **Provider:** Resend (`lib/resend-notifications.ts`); SMTP via Nodemailer as fallback (`lib/notifications.ts`).
 - **Events:** booking confirmation (on payment verify) → customer; vehicle assignment / reassignment → driver; cancellation processed → customer.
 - **Note:** SMS & WhatsApp are placeholders (console-logged) — see TODOs.
 
-### 11.8 Conflict Control System
+### 11.7 Conflict Control System
 
 - **Toggle:** `app_settings.conflict_control_enabled` (default ON).
-- **ON:** airport/hourly booking creation rejects exhausted selected models; tour booking remains allowed with a vehicle warning; admin vehicle assignment conflicts are allowed only as recorded overrides (`existing.start < new.end AND existing.end > new.start`).
+- **ON:** taxi booking creation rejects exhausted selected models; tour booking remains allowed with a vehicle warning; admin vehicle assignment conflicts are allowed only as recorded overrides (`existing.start < new.end AND existing.end > new.start`).
 - **OFF:** customer availability lists all active vehicles; the Misc-tab scanner (`GET /api/admin/conflicts`) still lists **assignment conflicts** (same car overlapping, or one booking with multiple overlapping vehicles) and **model conflicts** (true model over-subscription in a window).
 - **UX:** turning the toggle OFF shows a confirmation warning first.
 
-### 11.9 SEO & Marketing Pages
+### 11.8 SEO & Marketing Pages
 
 | Route | Targets search intent |
 |-------|-----------------------|
 | `/hollongi-airport-taxi` | "Hollongi airport taxi" |
 | `/donyi-polo-airport-taxi` | "Donyi Polo airport taxi" |
 | `/itanagar-airport-taxi` | "Itanagar airport taxi" (legacy `/airport-taxi-itanagar` → 301 here) |
-| `/hourly-taxi-itanagar` | "hourly taxi Itanagar" |
 | `/arunachal-tours` | "Arunachal Pradesh tours" |
 | `/itanagar-tours` | "Itanagar tours" |
 | `/faq`, `/terms`, `/privacy` | informational / trust pages |
@@ -1548,10 +1518,10 @@ Stat cards: **Total Bookings**, **Total Revenue** (`Rs. {total}`), **Active Book
 Full booking list with filters and the pending-cancellation badge. Assignment filters include **All Assignments**, **Assigned**, **Assigned (Car Deleted)**, and **Not Assigned**. If an assignment exists but its linked car row was hard-deleted, the booking summary still surfaces that state via the compact vehicle status label (`Car Deleted`) and the expanded panel shows snapshot details from `vehicle_assignments` (`car_model_snapshot`, plate/driver snapshots). Per-booking actions: open details; **assign vehicle & driver** (`/api/bookings/assign-vehicle`, `/update-assignment`, `/get-assignments`); **update status** (`/api/bookings/update-status`); **confirm cash** (`/api/payment/confirm-cash`); **process cancellation** (`/api/admin/process-cancellation`). Hard-delete of a booking is also supported. Statuses revert to `confirmed` after a marked state is undone where applicable.
 
 ### 12.3 Cars Tab (`renderCarManagement`)
-CRUD over `cars` (`GET/POST /api/cars`, `GET/PUT/DELETE /api/cars/[id]`): `model_name`, `class`, `capacity`, `number_plate`, `per_km_charge`, `per_hr_charge`, `is_active`. Adding a car runs a strict validation check (e.g. plate uniqueness, sane numbers). Active/inactive toggle controls availability listings. Permanent delete is supported: if a deleted car was referenced by historical `vehicle_assignments`, those assignment rows are preserved and `vehicle_assignments.car_id` is set to `NULL` (`ON DELETE SET NULL`), while snapshot columns keep historical vehicle/driver details readable.
+CRUD over `cars` (`GET/POST /api/cars`, `GET/PUT/DELETE /api/cars/[id]`): `model_name`, `class`, `capacity`, `number_plate`, `driver_name`, `driver_phone`, `driver_email`, `driver_verified`, `is_active`. Driver licence fields have been removed from the system. When adding a car, admins can pick a class from compact selectable options, or leave it on Auto and let the UI assign class from capacity (`<=4 Economy`, `<=6 Premium`, `<=8 Luxury`, `>8 Group`). If the typed model already exists in the fleet, the form auto-fills shared vehicle attributes such as capacity and class. Editing now opens inline within the selected car card/row instead of jumping to a separate top form. Active/inactive toggle controls availability listings. Permanent delete is supported: if a deleted car was referenced by historical `vehicle_assignments`, those assignment rows are preserved and `vehicle_assignments.car_id` is set to `NULL` (`ON DELETE SET NULL`), while snapshot columns keep historical vehicle/driver details readable.
 
 ### 12.4 Destinations Tab (`renderDestinations`)
-CRUD over `destinations` (`GET/POST /api/destinations`, `GET/PUT/DELETE /api/destinations/[id]`): `name`, `distance_km`, `estimated_duration_minutes`, `description`, `is_active`. Distances are measured FROM Hollongi Airport. Distance and duration feed airport-fare calculation and ETAs shown to customers.
+CRUD over `destinations` (`GET/POST /api/destinations`, `GET/PUT/DELETE /api/destinations/[id]`): `name`, `estimated_duration_minutes`, `description`, `is_active`. Destinations now drive fixed-fare airport-taxi pricing through the separate `destination_car_fares` table. Editing opens inline within the selected destination row/card, and fare assignment is handled in the taller `Assign Fixed Fares` modal with a scrollable model list.
 
 ### 12.5 Tours Tab (`renderTours`)
 CRUD over `tour_packages` (`GET/POST /api/tours`, `GET/PUT /api/tours/[id]`, `GET /api/tours/[id]/availability`, `POST /api/tours/upload-image`): `name`, `description`, `arrival_time`, `duration_hours`, `price`, `max_passengers`, `car_model`, `itinerary`, `highlights[]`, `image_url`, `image_urls[]` (multi-image), `is_active`. Tour vehicles are linked into the conflict system.
@@ -1564,7 +1534,7 @@ CRUD over `tour_packages` (`GET/POST /api/tours`, `GET/PUT /api/tours/[id]`, `GE
 Backing data is computed into an `analytics` object: `totalRevenue`, `completedBookings`, `averageBookingValue`, `fleetUtilization`, `pendingBookings`, `cancelledBookings`, `totalPaid`, `totalCashCollected`, `bookingTrend[]`, `topDestinations[]`, `topTours[]`.
 
 ### 12.7 Misc Tab (`renderMisc`)
-- **Settings:** dark-mode toggle; "Admin Panel Version v2.0"; "Last Updated" (today).
+- **Settings:** dark-mode toggle; "Admin Panel Version v2.1"; "Last Updated" (today).
 - **Documentation:** tag chips + **"Go to Docs"** button → `/admin/docs` (this document, rendered with live Mermaid diagrams).
 - **Booking Conflict Control:** ON/OFF toggle (warns before disabling); conflict scanner (`GET /api/admin/conflicts`) listing assignment conflicts and model conflicts.
 - **Pending Booking Management:** auto-cleanup ON/OFF; cleanup window 1–30 days; "run cleanup now"; current pending count.
@@ -1609,6 +1579,9 @@ SELECT email, full_name, last_login, is_active FROM public.admins ORDER BY last_
 | `GET /api/admin/settings` | Bearer | — | `{ conflict_control_enabled, ... }` |
 | `PATCH /api/admin/settings` | Bearer | `{ key, value }` | `{ success }` |
 | `GET /api/admin/conflicts` | Bearer | — | `{ assignment_conflicts:[], model_conflicts:[], total }` |
+| `GET /api/admin/car-model-library` | Bearer | — | `{ success, models:[...] }` |
+| `GET /api/admin/destination-fares` | Bearer | `?destination_id=` | `{ success, fares:[...] }` |
+| `PUT /api/admin/destination-fares` | Bearer | `{ destination_id, fares:[{ model_name, fixed_fare }] }` | `{ success, saved_count }` |
 | `POST /api/admin/process-cancellation` | Bearer | `{ booking_id, refund_notes? }` | `{ success }` |
 | `POST /api/admin/cleanup-pending` | Bearer / cron | — | `{ success, deleted }` — invoked daily by Vercel Cron |
 
@@ -1623,7 +1596,7 @@ SELECT email, full_name, last_login, is_active FROM public.admins ORDER BY last_
 
 | Method & Path | Auth | Body / Query | Returns |
 |---------------|------|--------------|---------|
-| `POST /api/bookings/create` | session | `{ booking_type, user_name, user_email, phone, passenger_count, booking_date, start_time, destination_id?, tour_package_id?, no_of_hours?, car_model?, amount_total }` | `{ success, booking, conflict_warning? }` · 409 conflict |
+| `POST /api/bookings/create` | session | `{ booking_type, user_name, user_email, phone, passenger_count, booking_date, start_time, destination_id?, tour_package_id?, car_model?, amount_total }` | `{ success, booking, conflict_warning? }` · 409 conflict |
 | `GET /api/bookings/user` | session | `?email=` | `{ bookings:[...] }` |
 | `GET /api/bookings/admin` | Bearer | `?status=&limit=&offset=` | `{ bookings:[...] }` |
 | `POST /api/bookings/assign-vehicle` | Bearer | `{ booking_id, car_id, start_datetime, end_datetime }` | `{ success, warnings?, conflict_override }` |
@@ -1649,10 +1622,10 @@ SELECT email, full_name, last_login, is_active FROM public.admins ORDER BY last_
 
 | Method & Path | Auth | Body / Query | Returns |
 |---------------|------|--------------|---------|
-| `GET /api/cars/available-models` | — | `?booking_date=&start_time=&end_time=` | `{ models:[{ model_name, class, capacity, per_km_charge, per_hr_charge, available_count }] }` |
-| `GET /api/cars` | Bearer | — | `{ cars:[...] }` |
-| `POST /api/cars` | Bearer | `{ model_name, class, capacity, number_plate, per_km_charge, per_hr_charge }` | `{ success, car }` |
-| `GET /api/cars/[id]` | Bearer | — | `{ car }` |
+| `GET /api/cars/available-models` | — | `?destination_id=&booking_date=&start_time=&end_time=&end_date?=` | `{ models:[{ model_name, class, capacity, fixed_fare, available_count }], conflict_control_enabled }` |
+| `GET /api/cars` | public (`include_inactive=true` requires Bearer) | `?include_inactive=` | `{ cars:[...] }` |
+| `POST /api/cars` | Bearer | `{ model_name, class, capacity, number_plate, driver_name, driver_phone, driver_email?, driver_verified? }` | `{ success, car }` |
+| `PATCH /api/cars/[id]` | Bearer | `{ is_active }` | `{ success, car }` |
 | `PUT /api/cars/[id]` | Bearer | partial car | `{ success }` |
 | `DELETE /api/cars/[id]` | Bearer | — | `{ success }` |
 
@@ -1672,7 +1645,7 @@ SELECT email, full_name, last_login, is_active FROM public.admins ORDER BY last_
 | Method & Path | Auth | Body | Returns |
 |---------------|------|------|---------|
 | `GET /api/destinations` | — | — | `{ destinations:[...] }` |
-| `POST /api/destinations` | Bearer | `{ name, distance_km, estimated_duration_minutes, description? }` | `{ success, destination }` |
+| `POST /api/destinations` | Bearer | `{ name, estimated_duration_minutes, description? }` | `{ success, destination }` |
 | `GET /api/destinations/[id]` | — | — | `{ destination }` |
 | `PUT /api/destinations/[id]` | Bearer | partial | `{ success }` |
 | `DELETE /api/destinations/[id]` | Bearer | — | `{ success }` |
@@ -1759,7 +1732,7 @@ TaxiHollongi/                        # repo root — RT&T platform
 │   │   │   └── exchange-code/       # POST  — server-side PKCE code → session exchange
 │   │   │
 │   │   ├── bookings/
-│   │   │   ├── create/              # POST  — create booking (airport / tour / hourly)
+│   │   │   ├── create/              # POST  — create booking (taxi / tour)
 │   │   │   ├── user/                # GET   — bookings for a customer (by email)
 │   │   │   ├── admin/               # GET   — all bookings (admin, paginated)
 │   │   │   ├── assign-vehicle/      # POST  — assign car + driver to a booking
@@ -1799,7 +1772,7 @@ TaxiHollongi/                        # repo root — RT&T platform
 │   │   ├── page.tsx                 # Admin dashboard
 │   │   └── docs/page.tsx            # This document viewer
 │   │
-│   ├── book-taxi/                   # Taxi booking wizard (airport + hourly)
+│   ├── book-taxi/                   # Fixed-fare airport taxi booking wizard
 │   ├── tours/
 │   │   ├── page.tsx                 # Tour listing
 │   │   ├── [id]/book/               # Tour booking wizard
@@ -1819,7 +1792,6 @@ TaxiHollongi/                        # repo root — RT&T platform
 │   ├── hollongi-airport-taxi/       # SEO landing pages
 │   ├── donyi-polo-airport-taxi/
 │   ├── itanagar-airport-taxi/
-│   ├── hourly-taxi-itanagar/
 │   ├── arunachal-tours/
 │   ├── itanagar-tours/
 │   │
@@ -1892,16 +1864,18 @@ TaxiHollongi/                        # repo root — RT&T platform
 ```
 
 ### 14.6 Database Setup
-All 10 tables are in `sql/`. Run them in order in the Supabase SQL Editor (see `sql/README.md`):
+Run the SQL files in `sql/` in the order described by [`sql/README.md`](/d:/CODE/BeeDigital/TaxiHollongi/sql/README.md):
 
-1. `sql/cars_schema.sql` — `cars` table (vehicles + driver info, per-km/hr rates)
-2. `sql/destinations_schema.sql` — `destinations` table (FROM-airport routes + distance)
+1. `sql/cars_schema.sql` — `cars` table (vehicle + driver details, no driver licence fields)
+2. `sql/destinations_schema.sql` — `destinations` and `destination_car_fares` (fixed-fare pricing per destination and model)
 3. `sql/tour_packages.sql` — `tour_packages` table (+ seed data)
 4. `sql/bookings_and_payments_schema.sql` — `bookings`, `payments`, `payment_records` (+ enum types, constraints, alterations)
 5. `sql/assignments_schema.sql` — `vehicle_assignments` table (booking ↔ car FK, `car_id` nullable with `ON DELETE SET NULL`, plus vehicle/driver snapshot fields)
 6. `sql/admin_schema.sql` — `admins` table (+ default admin, RLS, indexes)
 7. `sql/reviews_schema.sql` — `reviews` table (polymorphic, + unique index)
 8. `sql/app_settings_schema.sql` — `app_settings` table (+ seeds `conflict_control_enabled='true'`)
+9. `sql/system_events_schema.sql` — `system_events` table for sanitized operational logging
+10. `sql/migrate_tour_arrival_time_to_time.sql` — one-time migration script for `tour_packages.arrival_time`
 
 ### 14.7 Admin Account Setup
 ```bash
@@ -1968,8 +1942,8 @@ Browser console (F12) · `npm run dev` terminal for server logs · Supabase dash
 
 | Term | Meaning |
 |------|---------|
-| **Booking** | A customer's order for a trip (airport, tour, or hourly). Identified by `booking_id`. |
-| **Booking type** | `airport` \| `tour` \| `hourly`. |
+| **Booking** | A customer's order for a trip (taxi or tour). Identified by `booking_id`. |
+| **Booking type** | `taxi` \| `tour`. |
 | **Booking status** | `pending` → `confirmed` → `completed` \| `cancelled`. |
 | **Payment type** | `partial` (30% online + 70% cash) or `full` (100% online). |
 | **Payment status** | `pending` \| `partial` \| `paid`. |
@@ -1977,7 +1951,7 @@ Browser console (F12) · `npm run dev` terminal for server logs · Supabase dash
 | **Refund status** | `none` \| `pending` \| `processed` \| `failed` (refunds are manual). |
 | **Car model vs car** | Customers pick a *model* (name/class/capacity/price/available count); admins later assign a specific *car* (with number plate) and driver. |
 | **Vehicle assignment** | A row linking a specific car + driver to a booking for a time window; basis of conflict detection. |
-| **Conflict control** | The toggle (`app_settings.conflict_control_enabled`) that, when ON, blocks customer airport/hourly model overbooking, warns for tour preferred-model shortages, and records explicit admin overrides for hard assignment overlaps. |
+| **Conflict control** | The toggle (`app_settings.conflict_control_enabled`) that, when ON, blocks customer taxi-model overbooking, warns for tour preferred-model shortages, and records explicit admin overrides for hard assignment overlaps. |
 | **Overlap** | Two windows overlap iff `start_A < end_B AND end_A > start_B`. |
 | **Advance / cash split** | Advance = `round(total × 0.30 × 100)/100`; cash = `total − advance`. |
 | **Invoice number** | Generated at payment verification; stored on the `payment_records` row; rendered into the PDF. |
@@ -1986,4 +1960,4 @@ Browser console (F12) · `npm run dev` terminal for server logs · Supabase dash
 
 ---
 
-*Rina's Tours and Travels — Complete Application Documentation v2.0 · Generated 2026-05-27 (branch v2-unstable). Diagrams rendered via Mermaid in the in-app viewer at /admin/docs.*
+*Rina's Tours and Travels — Complete Application Documentation v2.1 · Generated 2026-06-01 (branch v2-stable). Diagrams rendered via Mermaid in the in-app viewer at /admin/docs.*

@@ -146,8 +146,15 @@ export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<jsPD
   doc.text('BOOKING DETAILS', margin, yPosition)
   yPosition += 8
 
+  const isTourBooking = invoiceData.bookingType === 'tour'
+  const tripLabel = isTourBooking ? 'Tour Package' : 'Destination'
+  const tripValue = isTourBooking
+    ? (invoiceData.tourPackageName || '-')
+    : (invoiceData.destination || '-')
+
   const bookingDetails = [
-    { label: 'Service Type', value: invoiceData.bookingType === 'taxi' ? 'Taxi Service' : 'Tour Package' },
+    { label: 'Service Type', value: isTourBooking ? 'Tour Package' : 'Taxi Service' },
+    { label: tripLabel, value: tripValue },
     { label: 'Location', value: invoiceData.pickupLocation || 'Donyi Polo Airport, Hollongi' },
     { label: 'Pickup Date', value: formatDate(invoiceData.pickupDate) },
     { label: 'Pickup Time', value: invoiceData.pickupTime || 'As per booking' },
@@ -158,22 +165,46 @@ export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<jsPD
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
 
-  // Create a 2-column layout for booking details
-  const detailsPerColumn = 3
-  bookingDetails.forEach((detail, index) => {
-    const colX = index < detailsPerColumn ? margin : pageWidth / 2 + 5
-    const rowY = yPosition + (index % detailsPerColumn) * 6
+  // Create a fixed-width 2-column layout so long values never overlap
+  const leftColumn = bookingDetails.slice(0, 3)
+  const rightColumn = bookingDetails.slice(3)
+  const columnGap = 12
+  const columnWidth = (contentWidth - columnGap) / 2
+  const leftColX = margin
+  const rightColX = margin + columnWidth + columnGap
+  const labelWidth = 30
+  const valueXOffset = labelWidth + 2
+  const valueWidth = columnWidth - valueXOffset - 1
+  const lineHeight = 4.1
+  const rowSpacing = 2.2
 
-    doc.setTextColor(100, 100, 100)
-    doc.setFont('helvetica', 'bold')
-    doc.text(detail.label + ':', colX, rowY)
+  const renderColumn = (
+    details: Array<{ label: string; value: string }>,
+    colX: number,
+    startY: number
+  ) => {
+    let currentY = startY
 
-    doc.setTextColor(0, 0, 0)
-    doc.setFont('helvetica', 'normal')
-    doc.text(detail.value, colX + 45, rowY)
-  })
+    details.forEach((detail) => {
+      doc.setTextColor(100, 100, 100)
+      doc.setFont('helvetica', 'bold')
+      doc.text(`${detail.label}:`, colX, currentY)
 
-  yPosition += 22
+      const valueLines = doc.splitTextToSize(String(detail.value || '-'), valueWidth) as string[]
+      doc.setTextColor(0, 0, 0)
+      doc.setFont('helvetica', 'normal')
+      doc.text(valueLines, colX + valueXOffset, currentY)
+
+      const valueBlockHeight = Math.max(lineHeight, valueLines.length * lineHeight)
+      currentY += valueBlockHeight + rowSpacing
+    })
+
+    return currentY
+  }
+
+  const leftEndY = renderColumn(leftColumn, leftColX, yPosition)
+  const rightEndY = renderColumn(rightColumn, rightColX, yPosition)
+  yPosition = Math.max(leftEndY, rightEndY) + 2
 
   // ============ DIVIDER ============
   doc.setDrawColor(200, 200, 200)

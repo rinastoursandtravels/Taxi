@@ -10,6 +10,7 @@ const APP_LOGO_URL = 'https://hpobmsfwvrewpjqnmhsv.supabase.co/storage/v1/object
 const SUPPORT_EMAIL = 'support@taxihollongi.com'
 const SUPPORT_PHONE = '+91-9101764656 / +91-9181301029'
 const OFFICE_LOCATION = 'Inside the Arrival Hall, beside the Exit Gate, Donyi Polo Airport, Hollongi, Itanagar'
+const AIRPORT_PICKUP_POINT = 'Exit Gate, Donyi Polo Airport, Hollongi, Itanagar'
 
 function inr(amount: number) {
   return `&#8377;${amount.toLocaleString('en-IN')}`
@@ -87,6 +88,32 @@ function formatDateTime(value: string) {
   return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+function formatTimeWithMeridiem(value?: string) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/\b(am|pm)\b/i.test(raw)) return raw.replace(/\b(am|pm)\b/i, (match) => match.toUpperCase())
+
+  const compactTime = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/)
+  if (compactTime) {
+    const hours = Number(compactTime[1])
+    const minutes = Number(compactTime[2])
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      const suffix = hours >= 12 ? 'PM' : 'AM'
+      const displayHour = hours % 12 || 12
+      return `${String(displayHour).padStart(2, '0')}:${String(minutes).padStart(2, '0')} ${suffix}`
+    }
+  }
+
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed
+      .toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+      .replace(/\b(am|pm)\b/i, (match) => match.toUpperCase())
+  }
+
+  return raw
+}
+
 async function send(to: string | string[], subject: string, html: string) {
   if (!process.env.RESEND_API_KEY) {
     console.error('[EMAIL] RESEND_API_KEY is not set - email not sent')
@@ -142,7 +169,7 @@ export async function sendBookingConfirmation(data: BookingConfirmationEmail) {
       ${row('Booking ID', `<span style="font-family:monospace;">${data.bookingId}</span>`)}
       ${row('Service Type', data.bookingType === 'tour' ? 'Tour Package' : 'Taxi Booking')}
       ${row(data.bookingType === 'tour' ? 'Package' : 'Destination', tripLabel)}
-      ${row('Pickup Location', OFFICE_LOCATION)}
+      ${row('Pickup Location', AIRPORT_PICKUP_POINT)}
       ${row('Pickup Date', formatDate(data.pickupDate))}
       ${data.pickupTime ? row('Pickup Time', data.pickupTime) : ''}
       ${row('Vehicle', data.carType.charAt(0).toUpperCase() + data.carType.slice(1))}
@@ -227,6 +254,9 @@ export interface VehicleAssignmentEmail {
   to: string
   userName: string
   bookingId: string
+  bookingType?: string
+  destination?: string
+  tourPackageName?: string
   pickupDate: string
   pickupTime?: string
   vehicleModel: string
@@ -241,6 +271,12 @@ export async function sendVehicleAssignment(data: VehicleAssignmentEmail) {
   const subtitle = data.isReassignment
     ? `Hi ${data.userName}, your vehicle for booking <strong>${data.bookingId}</strong> has been updated.`
     : `Hi ${data.userName}, your driver and vehicle are now assigned for booking <strong>${data.bookingId}</strong>.`
+  const isTourBooking = data.bookingType === 'tour'
+  const serviceType = isTourBooking ? 'Tour Package' : 'Taxi Booking'
+  const tripLabel = isTourBooking
+    ? (data.tourPackageName || 'Tour Package')
+    : (data.destination || 'Destination not available')
+  const displayPickupTime = formatTimeWithMeridiem(data.pickupTime)
 
   const body = `
     <p style="margin:0 0 4px;font-size:22px;font-weight:700;color:#111827;">${title}</p>
@@ -257,9 +293,11 @@ export async function sendVehicleAssignment(data: VehicleAssignmentEmail) {
     ${sectionTitle('Pickup Details')}
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
       ${row('Booking ID', `<span style="font-family:monospace;">${data.bookingId}</span>`)}
-      ${row('Pickup Location', OFFICE_LOCATION)}
+      ${row('Service Type', serviceType)}
+      ${row(isTourBooking ? 'Package' : 'Destination', tripLabel)}
+      ${row('Pickup Location', AIRPORT_PICKUP_POINT)}
       ${row('Pickup Date', formatDate(data.pickupDate))}
-      ${data.pickupTime ? row('Pickup Time', data.pickupTime) : ''}
+      ${displayPickupTime ? row('Pickup Time', displayPickupTime) : ''}
     </table>
 
     ${infoNote("Please be ready 10 minutes before pickup and keep your phone reachable.")}
@@ -296,7 +334,7 @@ export async function sendAdminNotification(data: {
       ${row('Booking ID', `<span style="font-family:monospace;">${data.bookingId}</span>`)}
       ${row('Customer', `${data.userName} &lt;${data.userEmail}&gt;`)}
       ${row('Type', data.bookingType === 'tour' ? 'Tour Package' : 'Taxi Booking')}
-      ${data.destination ? row('Destination', data.destination) : ''}
+      ${data.destination ? row(data.bookingType === 'tour' ? 'Package' : 'Destination', data.destination) : ''}
       ${data.pickupDate ? row('Pickup Date', formatDate(data.pickupDate)) : ''}
       ${row('Amount', inr(data.totalAmount))}
     </table>
@@ -312,6 +350,9 @@ export interface DriverAssignmentEmail {
   to: string
   driverName: string
   bookingId: string
+  bookingType?: string
+  destination?: string
+  tourPackageName?: string
   customerName: string
   customerPhone: string
   pickupDate: string
@@ -323,6 +364,11 @@ export interface DriverAssignmentEmail {
 
 export async function sendDriverAssignment(data: DriverAssignmentEmail) {
   const title = data.isReassignment ? 'Trip Reassigned to You' : 'New Trip Assigned'
+  const isTourBooking = data.bookingType === 'tour'
+  const tripLabel = isTourBooking
+    ? (data.tourPackageName || 'Tour Package')
+    : (data.destination || 'Taxi Booking')
+  const displayPickupTime = formatTimeWithMeridiem(data.pickupTime)
 
   const body = `
     <p style="margin:0 0 4px;font-size:22px;font-weight:700;color:#111827;">${title}</p>
@@ -337,9 +383,10 @@ export async function sendDriverAssignment(data: DriverAssignmentEmail) {
     ${sectionTitle('Trip Details')}
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
       ${row('Booking ID', `<span style="font-family:monospace;">${data.bookingId}</span>`)}
-      ${row('Pickup Location', OFFICE_LOCATION)}
+      ${row(isTourBooking ? 'Package' : 'Destination', tripLabel)}
+      ${row('Pickup Location', AIRPORT_PICKUP_POINT)}
       ${row('Pickup Date', formatDate(data.pickupDate))}
-      ${data.pickupTime ? row('Pickup Time', data.pickupTime) : ''}
+      ${displayPickupTime ? row('Pickup Time', displayPickupTime) : ''}
     </table>
 
     ${sectionTitle('Assigned Vehicle')}

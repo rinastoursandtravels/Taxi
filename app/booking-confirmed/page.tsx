@@ -8,6 +8,13 @@ import gsap from 'gsap'
 import { generateInvoicePDF, downloadInvoicePDF, type InvoiceData } from '@/lib/invoice'
 import { CheckCircle, Download, Home, ArrowRight, Mail, Phone } from 'lucide-react'
 
+function formatTimeFromDateTime(value?: string | null): string | undefined {
+  if (!value) return undefined
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return undefined
+  return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 function BookingConfirmedContent() {
   const searchParams = useSearchParams()
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -94,22 +101,35 @@ function BookingConfirmedContent() {
 
   const generateAndDownloadInvoice = async () => {
     if (!booking || !payment) return
+
+    const bookingDetails = payment?.booking_details
+    const canonicalBookingType = bookingDetails?.booking_type || booking.bookingType
+    const pickupDate = bookingDetails?.pickup_date || bookingDetails?.start_datetime || booking.date
+    const pickupTime =
+      bookingDetails?.pickup_time
+      || formatTimeFromDateTime(bookingDetails?.start_datetime)
+      || booking.startTime
+      || booking.time
+    const carType = bookingDetails?.car_model || booking.carType || booking.car || 'Standard'
+    const destination = payment?.destination_name || booking.destination
+    const tourPackageName = payment?.tour_name || booking.tourName
+
     const onlineRecord = (payment.payment_records ?? []).find((r: { txn_type: string; invoice_number?: string | null }) => r.txn_type === 'online')
     const invoiceNumber = onlineRecord?.invoice_number || `INV-${booking.bookingId}-${Date.now()}`
     const invoiceData: InvoiceData = {
-      bookingId: booking.bookingId,
+      bookingId: bookingDetails?.booking_id || booking.bookingId,
       date: new Date().toLocaleDateString('en-IN'),
-      userName: booking.name,
-      userEmail: booking.email,
-      userPhone: booking.phone,
-      bookingType: booking.bookingType === 'tour' ? 'tour' : 'taxi',
-      destination: booking.destination,
-      tourPackageName: booking.tourName,
-      pickupLocation: 'Donyi Polo Airport, Hollongi',
-      pickupDate: booking.date,
-      pickupTime: booking.time,
-      passengers: booking.passengers,
-      carType: booking.carType,
+      userName: bookingDetails?.user_name || booking.name,
+      userEmail: bookingDetails?.user_email || booking.email,
+      userPhone: bookingDetails?.phone || booking.phone,
+      bookingType: canonicalBookingType === 'tour' ? 'tour' : 'taxi',
+      destination,
+      tourPackageName,
+      pickupLocation: 'Inside the Arrival Hall, beside the Exit Gate, Donyi Polo Airport, Hollongi, Itanagar',
+      pickupDate,
+      pickupTime,
+      passengers: Number(bookingDetails?.passenger_count || booking.passengers || 1),
+      carType,
       totalAmount: parseFloat(payment.amount_total),
       advanceAmount: parseFloat(payment.amount_online_paid),
       remainingAmount: payment.payment_type === 'full' ? 0 : parseFloat(payment.amount_total) - parseFloat(payment.amount_online_paid),

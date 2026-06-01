@@ -9,18 +9,82 @@ function isAssignmentOverlapError(error: unknown): boolean {
   return err?.code === '23P01' || text.includes('overlapping active vehicle assignment')
 }
 
+const BOOKING_ASSIGNMENT_SELECT = 'id, booking_id, passenger_count, start_datetime, end_datetime, user_name, phone, booking_type, destination_id, tour_package_id'
+
+function normalizeIdentifier(value?: unknown): string {
+  return String(value || '').trim().replace(/[\u200B-\u200D\uFEFF]/g, '')
+}
+
+function getPickupDateFromStart(startDateTime?: string | null): string | undefined {
+  const raw = String(startDateTime || '').trim()
+  if (!raw) return undefined
+  return raw.includes('T') ? raw.split('T')[0] : raw.split(' ')[0]
+}
+
+function getPickupTimeFromStart(startDateTime?: string | null): string | undefined {
+  const raw = String(startDateTime || '').trim()
+  if (!raw) return undefined
+
+  const parsed = new Date(raw)
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+  }
+
+  const timePart = raw.includes('T') ? raw.split('T')[1] : raw.split(' ')[1]
+  return timePart ? timePart.slice(0, 5) : undefined
+}
+
+async function fetchBookingByAnyId(...identifiers: Array<unknown>) {
+  const candidates = Array.from(new Set(identifiers.map(normalizeIdentifier).filter(Boolean)))
+
+  for (const candidate of candidates) {
+    const byBookingId = await supabaseAdmin
+      .from('bookings')
+      .select(BOOKING_ASSIGNMENT_SELECT)
+      .eq('booking_id', candidate)
+      .maybeSingle()
+
+    if (!byBookingId.error && byBookingId.data) {
+      return { booking: byBookingId.data, resolverPath: 'booking_id', usedIdentifier: candidate }
+    }
+
+    const byId = await supabaseAdmin
+      .from('bookings')
+      .select(BOOKING_ASSIGNMENT_SELECT)
+      .eq('id', candidate)
+      .maybeSingle()
+
+    if (!byId.error && byId.data) {
+      return { booking: byId.data, resolverPath: 'id_fallback', usedIdentifier: candidate }
+    }
+  }
+
+  return { booking: null, resolverPath: null, usedIdentifier: candidates[0] || '' }
+}
+
+function maskIdentifier(value?: string | null): string {
+  const raw = String(value || '').trim()
+  if (!raw) return '(empty)'
+  if (raw.length <= 10) return `${raw.slice(0, 3)}...${raw.slice(-2)}`
+  return `${raw.slice(0, 6)}...${raw.slice(-4)}`
+}
+
 export async function POST(request: Request) {
   const unauthorized = requireAdminRequest(request)
   if (unauthorized) return unauthorized
 
   try {
     const body = await request.json()
-    const { assignment_id, booking_id, car_id, start_datetime, end_datetime, user_email, user_name } = body
+    const { assignment_id, booking_id, booking_row_id, car_id, start_datetime, end_datetime, user_email, user_name } = body
 
-    console.log('=== Updating Vehicle Assignment ===')
-    console.log('Assignment ID:', assignment_id)
-    console.log('New Car ID:', car_id)
-    console.log('Booking ID:', booking_id)
+    console.log('[UPDATE_ASSIGNMENT] Incoming payload', {
+      assignment_id: maskIdentifier(assignment_id),
+      booking_id: maskIdentifier(booking_id),
+      booking_row_id: maskIdentifier(booking_row_id),
+      car_id: maskIdentifier(car_id),
+      has_start_datetime: Boolean(start_datetime),
+      has_end_datetime: Boolean(end_datetime),
+    })
 
     // Validate required fields
     if (!assignment_id || !car_id) {
@@ -73,21 +137,46 @@ export async function POST(request: Request) {
 
     const actualStartDateTime = start_datetime || assignment.start_datetime
     const actualEndDateTime = end_datetime || assignment.end_datetime
-    const resolvedBookingId = booking_id || assignment.booking_id
+    const resolvedBookingIdentifier = normalizeIdentifier(booking_id)
+      || normalizeIdentifier(booking_row_id)
+      || assignment.booking_id
+    const resolvedBooking = await fetchBookingByAnyId(booking_id, booking_row_id, assignment.booking_id)
+    const bookingDetails = resolvedBooking.booking
+    const canonicalBookingId = bookingDetails?.booking_id || assignment.booking_id
+    if (!bookingDetails) {
+      console.error('[UPDATE_ASSIGNMENT] Booking not found', {
+        assignment_id: maskIdentifier(assignment_id),
+        booking_id: maskIdentifier(booking_id),
+        booking_row_id: maskIdentifier(booking_row_id),
+        used_identifier: maskIdentifier(resolvedBookingIdentifier),
+      })
+      return Response.json(
+        {
+          success: false,
+          error: 'Booking not found',
+          diagnostic: {
+            assignment_id: maskIdentifier(assignment_id),
+            booking_id: maskIdentifier(booking_id),
+            booking_row_id: maskIdentifier(booking_row_id),
+            used_identifier: maskIdentifier(resolvedBookingIdentifier),
+          },
+        },
+        { status: 404 }
+      )
+    }
+    console.log('[UPDATE_ASSIGNMENT] Booking resolved', {
+      resolver_path: resolvedBooking.resolverPath || (resolvedBookingIdentifier === bookingDetails.booking_id ? 'booking_id' : 'id_fallback'),
+      resolved_booking_id: maskIdentifier(bookingDetails.booking_id),
+      resolved_row_id: maskIdentifier(bookingDetails.id),
+    })
+
     let conflictChecks = await getSpecificCarAssignmentConflicts({
       carId: car_id,
       start: actualStartDateTime,
       end: actualEndDateTime,
-      excludeBookingId: resolvedBookingId,
+      excludeBookingId: canonicalBookingId,
     })
-
-    const { data: bookingForWarnings } = await supabaseAdmin
-      .from('bookings')
-      .select('passenger_count')
-      .eq('booking_id', resolvedBookingId)
-      .single()
-
-    const hasCapacityWarning = Number(bookingForWarnings?.passenger_count || 0) > Number(car.capacity || 0)
+    const hasCapacityWarning = Number(bookingDetails?.passenger_count || 0) > Number(car.capacity || 0)
     let warnings = [
       ...(conflictChecks.length > 0
         ? [{
@@ -99,7 +188,7 @@ export async function POST(request: Request) {
       ...(hasCapacityWarning
         ? [{
             type: 'capacity_warning',
-            message: `This vehicle has ${car.capacity} seats but the booking has ${bookingForWarnings?.passenger_count} passenger(s).`,
+            message: `This vehicle has ${car.capacity} seats but the booking has ${bookingDetails?.passenger_count} passenger(s).`,
         }]
         : []),
     ]
@@ -133,7 +222,7 @@ export async function POST(request: Request) {
         carId: car_id,
         start: actualStartDateTime,
         end: actualEndDateTime,
-        excludeBookingId: resolvedBookingId,
+        excludeBookingId: canonicalBookingId,
       })
       shouldRecordOverride = true
       warnings = [
@@ -145,7 +234,7 @@ export async function POST(request: Request) {
         ...(hasCapacityWarning
           ? [{
               type: 'capacity_warning',
-              message: `This vehicle has ${car.capacity} seats but the booking has ${bookingForWarnings?.passenger_count} passenger(s).`,
+              message: `This vehicle has ${car.capacity} seats but the booking has ${bookingDetails?.passenger_count} passenger(s).`,
             }]
           : []),
       ]
@@ -189,24 +278,39 @@ export async function POST(request: Request) {
     const updatedAssignment = updateResult.data
     console.log('✅ Assignment updated successfully:', updatedAssignment)
 
-    // Fetch pickup details once — used by both customer and driver emails
-    const { data: bookingDetails } = await supabaseAdmin
-      .from('bookings')
-      .select('pickup_date, pickup_time, start_datetime, user_name, phone')
-      .eq('booking_id', resolvedBookingId)
-      .single()
+    const pickupDate = getPickupDateFromStart(bookingDetails?.start_datetime || actualStartDateTime)
+    const pickupTime = getPickupTimeFromStart(bookingDetails?.start_datetime || actualStartDateTime)
+    const bookingType = bookingDetails?.booking_type === 'tour' ? 'tour' : 'taxi'
+    let destination: string | undefined
+    let tourPackageName: string | undefined
 
-    const pickupDate = bookingDetails?.pickup_date
-      || (bookingDetails?.start_datetime ? bookingDetails.start_datetime.split('T')[0] : actualStartDateTime?.split('T')[0])
-    const pickupTime = bookingDetails?.pickup_time
-      || (actualStartDateTime ? new Date(actualStartDateTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : undefined)
+    if (bookingType === 'tour' && bookingDetails?.tour_package_id) {
+      const { data: tour } = await supabaseAdmin
+        .from('tour_packages')
+        .select('name')
+        .eq('id', bookingDetails.tour_package_id)
+        .single()
+      tourPackageName = tour?.name || undefined
+    }
+
+    if (bookingType !== 'tour' && bookingDetails?.destination_id) {
+      const { data: destinationRow } = await supabaseAdmin
+        .from('destinations')
+        .select('name')
+        .eq('id', bookingDetails.destination_id)
+        .single()
+      destination = destinationRow?.name || undefined
+    }
 
     // Send reassignment email to customer
     if (user_email) {
       await sendVehicleAssignment({
         to: user_email,
         userName: user_name || 'Customer',
-        bookingId: resolvedBookingId,
+        bookingId: canonicalBookingId,
+        bookingType,
+        destination,
+        tourPackageName,
         pickupDate,
         pickupTime,
         vehicleModel: car.model_name,
@@ -225,7 +329,7 @@ export async function POST(request: Request) {
       if (!isValidEmail(driverEmail)) {
         console.warn(`[EMAIL] Driver email invalid format: "${driverEmail}" — notifying admin`)
         await sendAdminDriverEmailAlert({
-          bookingId: resolvedBookingId,
+          bookingId: canonicalBookingId,
           driverName: car.driver_name,
           driverEmail,
           carModel: car.model_name,
@@ -238,7 +342,10 @@ export async function POST(request: Request) {
       const result = await sendDriverAssignment({
         to: driverEmail,
         driverName: car.driver_name,
-        bookingId: resolvedBookingId,
+        bookingId: canonicalBookingId,
+        bookingType,
+        destination,
+        tourPackageName,
         customerName: bookingDetails?.user_name || user_name || 'Customer',
         customerPhone: bookingDetails?.phone || '',
         pickupDate,
@@ -254,7 +361,7 @@ export async function POST(request: Request) {
       if (!result.success) {
         console.warn(`[EMAIL] Driver email delivery failed for "${driverEmail}" — notifying admin`)
         await sendAdminDriverEmailAlert({
-          bookingId: resolvedBookingId,
+          bookingId: canonicalBookingId,
           driverName: car.driver_name,
           driverEmail,
           carModel: car.model_name,

@@ -548,7 +548,7 @@ export default function AdminDashboard() {
     // Sign out any existing user sessions
     const signOutFromAuth = async () => {
       try {
-        await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+        await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {})
       } catch (error) {
         console.error('Error signing out:', error)
       }
@@ -1739,8 +1739,64 @@ export default function AdminDashboard() {
     return bookingTypeLabel(booking.booking_type)
   }
 
+  const bookingPaymentById = useMemo(() => {
+    const map = new Map<string, Payment>()
+    payments.forEach((payment) => {
+      if (!payment?.booking_id) return
+      map.set(payment.booking_id, payment)
+    })
+    return map
+  }, [payments])
+
+  const revenueSnapshot = useMemo(() => {
+    const isRevenueStatus = (status: string) => status === 'confirmed' || status === 'completed'
+
+    const rows = bookings.map((booking) => {
+      const bookingId = booking.booking_id || booking.id
+      const status = booking.booking_status || 'pending'
+      const payment = bookingPaymentById.get(bookingId)
+      const amountTotal = toNum(booking.amount_total)
+      const onlinePaid = toNum(payment?.amount_online_paid)
+      const cashPaid = toNum(payment?.amount_cash_paid)
+      const collected = onlinePaid + cashPaid
+      const refundProcessed = payment?.refund_status === 'processed' ? Math.max(0, toNum(payment.refund_amount)) : 0
+      const netCollected = Math.max(0, collected - refundProcessed)
+      const outstanding = Math.max(0, amountTotal - collected)
+
+      return {
+        booking,
+        bookingId,
+        status,
+        amountTotal,
+        collected,
+        netCollected,
+        outstanding,
+        refundProcessed,
+        isRevenueStatus: isRevenueStatus(status),
+      }
+    })
+
+    const revenueRows = rows.filter((row) => row.isRevenueStatus)
+    const totalRevenue = revenueRows.reduce((sum, row) => sum + row.netCollected, 0)
+    const totalOutstanding = revenueRows.reduce((sum, row) => sum + row.outstanding, 0)
+    const billableValue = revenueRows.reduce((sum, row) => sum + row.amountTotal, 0)
+    const paidRevenueRows = revenueRows.filter((row) => row.netCollected > 0)
+    const averageBookingValue = paidRevenueRows.length > 0
+      ? totalRevenue / paidRevenueRows.length
+      : 0
+
+    return {
+      rows,
+      revenueRows,
+      totalRevenue,
+      totalOutstanding,
+      billableValue,
+      averageBookingValue,
+    }
+  }, [bookings, bookingPaymentById])
+
   const stats = useMemo(() => {
-    const totalRevenue = bookings.reduce((sum, booking) => sum + toNum(booking.amount_total), 0)
+    const totalRevenue = revenueSnapshot.totalRevenue
     const activeBookings = bookings.filter((booking) => ACTIVE_STATUSES.has(booking.booking_status)).length
     const completedToday = bookings.filter(
       (booking) => booking.booking_status === 'completed' && booking.start_datetime && booking.start_datetime.slice(0, 10) === todayDate
@@ -1752,7 +1808,7 @@ export default function AdminDashboard() {
       activeBookings,
       completedToday,
     }
-  }, [bookings, todayDate])
+  }, [bookings, todayDate, revenueSnapshot.totalRevenue])
 
   // Handler to navigate to a booking in the All Bookings section
   const openBookingDetails = (bookingId: string) => {
@@ -1934,12 +1990,20 @@ export default function AdminDashboard() {
 
   // Open vehicle assignment modal
   const openVehicleAssignmentModal = (payment: Payment, booking: Booking) => {
+    const selectedRef = booking.booking_id || booking.id
+    const freshBooking = bookings.find((b) => (b.booking_id || b.id) === selectedRef)
+    if (!freshBooking) {
+      toast.error('This booking list changed. Please refresh bookings and try again.')
+      void loadBookings()
+      return
+    }
+
     setSelectedPaymentForVehicle(payment)
-    setSelectedBookingForVehicle(booking)
+    setSelectedBookingForVehicle(freshBooking)
     
     // Check if an assignment already exists for this booking
     const existingAssignment = vehicleAssignments.find(
-      (va) => va.booking_id === (booking.booking_id || booking.id)
+      (va) => va.booking_id === (freshBooking.booking_id || freshBooking.id)
     )
     
     if (existingAssignment) {
@@ -1973,30 +2037,53 @@ export default function AdminDashboard() {
     setSubmittingVehicleAssignment(true)
 
     try {
+      const selectedRef = selectedBookingForVehicle.booking_id || selectedBookingForVehicle.id
+      const freshBooking = bookings.find((b) => (b.booking_id || b.id) === selectedRef)
+      if (!freshBooking) {
+        toast.error('Booking data changed or was removed. Reloading latest bookings.')
+        closeVehicleAssignmentModal()
+        await loadBookings()
+        return
+      }
+
       // Check if assignment already exists for this booking
       const existingAssignment = vehicleAssignments.find(
-        (va) => va.booking_id === (selectedBookingForVehicle.booking_id || selectedBookingForVehicle.id)
+        (va) => va.booking_id === (freshBooking.booking_id || freshBooking.id)
       )
 
       const endpoint = existingAssignment 
         ? '/api/bookings/update-assignment'
         : '/api/bookings/assign-vehicle'
 
+      const assignPayload = {
+        booking_id: freshBooking.booking_id || freshBooking.id,
+        booking_row_id: freshBooking.id,
+        car_id: selectedCarForAssignment.id,
+        start_datetime: freshBooking.start_datetime,
+        end_datetime: freshBooking.end_datetime,
+        assignment_id: existingAssignment?.id,
+        user_email: freshBooking.user_email,
+        user_name: freshBooking.user_name,
+      }
+
+      console.log('[ADMIN_ASSIGN] Request', {
+        endpoint,
+        payload: assignPayload,
+      })
+
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: adminHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          booking_id: selectedBookingForVehicle.booking_id || selectedBookingForVehicle.id,
-          car_id: selectedCarForAssignment.id,
-          start_datetime: selectedBookingForVehicle.start_datetime,
-          end_datetime: selectedBookingForVehicle.end_datetime,
-          assignment_id: existingAssignment?.id,
-          user_email: selectedBookingForVehicle.user_email,
-          user_name: selectedBookingForVehicle.user_name,
-        }),
+        body: JSON.stringify(assignPayload),
       })
 
       const result = await response.json()
+      console.log('[ADMIN_ASSIGN] Response', {
+        endpoint,
+        ok: response.ok,
+        status: response.status,
+        result,
+      })
 
       if (!response.ok || !result.success) {
         throw new Error(result.error || 'Failed to assign vehicle')
@@ -4680,23 +4767,37 @@ export default function AdminDashboard() {
   )
 
   const analytics = useMemo(() => {
-    const totalRevenue = bookings.reduce((sum, booking) => sum + toNum(booking.amount_total), 0)
+    const bookingStatusById = new Map(
+      bookings.map((booking) => [booking.booking_id || booking.id, booking.booking_status || 'pending'] as const)
+    )
+    const revenueRowByBookingId = new Map(
+      revenueSnapshot.rows.map((row) => [row.bookingId, row] as const)
+    )
+
+    const totalRevenue = revenueSnapshot.totalRevenue
     const completedBookings = bookings.filter((booking) => booking.booking_status === 'completed').length
     const pendingBookings = bookings.filter((booking) => booking.booking_status === 'pending').length
     const confirmedBookings = bookings.filter((booking) => booking.booking_status === 'confirmed').length
     const cancelledBookings = bookings.filter((booking) => booking.booking_status === 'cancelled').length
-    const averageBookingValue = bookings.length > 0 ? totalRevenue / bookings.length : 0
+    const averageBookingValue = revenueSnapshot.averageBookingValue
 
     // Real payment statistics
-    const totalPaid = payments.reduce((sum, p) => sum + toNum(p.amount_online_paid), 0)
-    const totalCashCollected = payments.reduce((sum, p) => sum + toNum(p.amount_cash_paid), 0)
-    const paidBookings = payments.filter((p) => p.payment_status === 'paid').length
-    const partialPayments = payments.filter((p) => p.payment_status === 'partial').length
-    const pendingPayments = payments.filter((p) => p.payment_status === 'pending').length
-    const totalOutstanding = payments.reduce(
-      (sum, p) => sum + Math.max(0, toNum(p.amount_total) - toNum(p.amount_online_paid) - toNum(p.amount_cash_paid)),
+    const revenuePayments = payments.filter((payment) => {
+      const status = bookingStatusById.get(payment.booking_id)
+      return status === 'confirmed' || status === 'completed'
+    })
+    const totalPaidGross = revenuePayments.reduce((sum, p) => sum + toNum(p.amount_online_paid), 0)
+    const totalCashCollectedGross = revenuePayments.reduce((sum, p) => sum + toNum(p.amount_cash_paid), 0)
+    const totalRefundsProcessed = revenuePayments.reduce(
+      (sum, p) => sum + (p.refund_status === 'processed' ? Math.max(0, toNum(p.refund_amount)) : 0),
       0
     )
+    const totalPaid = Math.max(0, totalPaidGross - totalRefundsProcessed)
+    const totalCashCollected = totalCashCollectedGross
+    const paidBookings = revenuePayments.filter((p) => p.payment_status === 'paid').length
+    const partialPayments = revenuePayments.filter((p) => p.payment_status === 'partial').length
+    const pendingPayments = revenuePayments.filter((p) => p.payment_status === 'pending').length
+    const totalOutstanding = revenueSnapshot.totalOutstanding
 
     // Real booking trend - group by date (last 7 days)
     const last7Days = Array.from({ length: 7 }, (_, i) => {
@@ -4707,7 +4808,11 @@ export default function AdminDashboard() {
 
     const bookingTrend = last7Days.map((dateStr) => {
       const dayBookings = bookings.filter((b) => b.start_datetime && b.start_datetime.slice(0, 10) === dateStr)
-      const dayRevenue = dayBookings.reduce((sum, b) => sum + toNum(b.amount_total), 0)
+      const dayRevenue = dayBookings.reduce((sum, b) => {
+        const bookingId = b.booking_id || b.id
+        const row = revenueRowByBookingId.get(bookingId)
+        return sum + (row?.netCollected || 0)
+      }, 0)
       const dayName = new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'short' })
       return { date: dayName, bookings: dayBookings.length, revenue: dayRevenue }
     })
@@ -4746,7 +4851,9 @@ export default function AdminDashboard() {
       .map((tour) => ({
         name: tour.name,
         bookings: tourBookingCounts[tour.id] || 0,
-        revenue: (tourBookingCounts[tour.id] || 0) * tour.price,
+        revenue: revenueSnapshot.rows
+          .filter((row) => row.booking.tour_package_id === tour.id && row.isRevenueStatus)
+          .reduce((sum, row) => sum + row.netCollected, 0),
       }))
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5)
@@ -4757,7 +4864,9 @@ export default function AdminDashboard() {
     const fleetUtilization = bookings.length > 0 ? (bookings.filter((b) => b.car_model).length / bookings.length) * 100 : 0
     const completionRate = bookings.length > 0 ? (completedBookings / bookings.length) * 100 : 0
     const cancellationRate = bookings.length > 0 ? (cancelledBookings / bookings.length) * 100 : 0
-    const paymentCollectionRate = totalRevenue > 0 ? ((totalPaid + totalCashCollected) / totalRevenue) * 100 : 0
+    const paymentCollectionRate = revenueSnapshot.billableValue > 0
+      ? ((totalPaid + totalCashCollected) / revenueSnapshot.billableValue) * 100
+      : 0
 
     const activeBookingsForOps = bookings.filter((b) => b.booking_status === 'pending' || b.booking_status === 'confirmed')
     const assignedActiveBookings = activeBookingsForOps.filter((b) =>
@@ -4769,7 +4878,9 @@ export default function AdminDashboard() {
 
     const bookingTypeStats = (['taxi', 'tour'] as const).map((type) => {
       const typeBookings = bookings.filter((b) => b.booking_type === type)
-      const typeRevenue = typeBookings.reduce((sum, b) => sum + toNum(b.amount_total), 0)
+      const typeRevenue = revenueSnapshot.rows
+        .filter((row) => row.booking.booking_type === type && row.isRevenueStatus)
+        .reduce((sum, row) => sum + row.netCollected, 0)
       return { type, count: typeBookings.length, revenue: typeRevenue }
     })
 
@@ -4823,7 +4934,7 @@ export default function AdminDashboard() {
       assignedActiveBookings,
       activeOpsCount: activeBookingsForOps.length,
     }
-  }, [bookings, payments, tours, cars, destinations, vehicleAssignments])
+  }, [bookings, payments, tours, cars, destinations, vehicleAssignments, revenueSnapshot])
 
   const handleCreateAdmin = async () => {
     // Validate form
