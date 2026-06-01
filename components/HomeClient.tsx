@@ -1631,27 +1631,20 @@ export default function HomeClient() {
                       <animateTransform attributeName="transform" type="translate" values="0,10;0,10;0,0;0,0;0,-10;0,-10" keyTimes="0;0.167;0.185;0.315;0.333;1" dur="18s" repeatCount="indefinite"/>
                       <text x="192" y="88" fontSize="7.5" fill="rgba(255,218,0,0.35)" fontFamily="monospace">STEP 1 · CHOOSE SERVICE</text>
                       <text x="280" y="113" textAnchor="middle" fontSize="13" fontWeight="bold" fill="rgba(255,255,255,0.88)" fontFamily="sans-serif">What do you need?</text>
-                      {/* Airport card – active */}
+                      {/* Taxi card - active */}
                       <rect x="183" y="126" width="194" height="52" rx="8" fill="rgba(255,218,0,0.1)" stroke="rgba(255,218,0,0.55)" strokeWidth="1.2"/>
                       <circle cx="206" cy="152" r="13" fill="rgba(255,218,0,0.12)"/>
-                      <text x="206" y="157" textAnchor="middle" fontSize="14" fill="rgba(255,218,0,0.88)">✈</text>
-                      <text x="226" y="147" fontSize="10.5" fontWeight="bold" fill="rgba(255,218,0,0.92)" fontFamily="sans-serif">Airport Taxi</text>
-                      <text x="226" y="162" fontSize="8" fill="rgba(255,218,0,0.45)" fontFamily="monospace">Donyi Polo Airport · HGI</text>
+                      <text x="206" y="157" textAnchor="middle" fontSize="9" fontWeight="bold" fill="rgba(255,218,0,0.88)" fontFamily="monospace">TX</text>
+                      <text x="226" y="147" fontSize="10.5" fontWeight="bold" fill="rgba(255,218,0,0.92)" fontFamily="sans-serif">Taxi Booking</text>
+                      <text x="226" y="162" fontSize="8" fill="rgba(255,218,0,0.45)" fontFamily="monospace">Airport &amp; city rides</text>
                       <text x="366" y="155" fontSize="14" fill="rgba(255,218,0,0.5)" fontFamily="sans-serif">›</text>
-                      {/* Hourly card */}
-                      <rect x="183" y="186" width="194" height="52" rx="8" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.1)" strokeWidth="0.8"/>
-                      <circle cx="206" cy="212" r="13" fill="rgba(255,255,255,0.04)"/>
-                      <text x="206" y="217" textAnchor="middle" fontSize="14" fill="rgba(255,255,255,0.45)">⏱</text>
-                      <text x="226" y="207" fontSize="10.5" fontWeight="bold" fill="rgba(255,255,255,0.5)" fontFamily="sans-serif">Hourly Hire</text>
-                      <text x="226" y="222" fontSize="8" fill="rgba(255,255,255,0.25)" fontFamily="monospace">Per hour · Itanagar</text>
-                      <text x="366" y="215" fontSize="14" fill="rgba(255,255,255,0.2)" fontFamily="sans-serif">›</text>
                       {/* Tour card */}
-                      <rect x="183" y="246" width="194" height="52" rx="8" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.1)" strokeWidth="0.8"/>
-                      <circle cx="206" cy="272" r="13" fill="rgba(255,255,255,0.04)"/>
-                      <text x="206" y="277" textAnchor="middle" fontSize="14" fill="rgba(255,255,255,0.45)">🗺</text>
-                      <text x="226" y="267" fontSize="10.5" fontWeight="bold" fill="rgba(255,255,255,0.5)" fontFamily="sans-serif">Tour Package</text>
-                      <text x="226" y="282" fontSize="8" fill="rgba(255,255,255,0.25)" fontFamily="monospace">Fixed price tours</text>
-                      <text x="366" y="275" fontSize="14" fill="rgba(255,255,255,0.2)" fontFamily="sans-serif">›</text>
+                      <rect x="183" y="194" width="194" height="52" rx="8" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.1)" strokeWidth="0.8"/>
+                      <circle cx="206" cy="220" r="13" fill="rgba(255,255,255,0.04)"/>
+                      <text x="206" y="223" textAnchor="middle" fontSize="8.5" fontWeight="bold" fill="rgba(255,255,255,0.45)" fontFamily="monospace">TO</text>
+                      <text x="226" y="215" fontSize="10.5" fontWeight="bold" fill="rgba(255,255,255,0.5)" fontFamily="sans-serif">Tour Package</text>
+                      <text x="226" y="230" fontSize="8" fill="rgba(255,255,255,0.25)" fontFamily="monospace">Fixed price tours</text>
+                      <text x="366" y="223" fontSize="14" fill="rgba(255,255,255,0.2)" fontFamily="sans-serif">›</text>
                     </g>
 
                     {/* Step 3 — Fill Booking Details (6–9s) */}
@@ -1717,7 +1710,7 @@ export default function HomeClient() {
                       ))}
                       {/* Summary */}
                       <rect x="183" y="112" width="194" height="96" rx="8" fill="rgba(255,255,255,0.04)" stroke="rgba(255,218,0,0.12)" strokeWidth="0.8"/>
-                      <text x="193" y="131" fontSize="9" fontWeight="bold" fill="rgba(255,255,255,0.72)" fontFamily="sans-serif">Airport Taxi · Itanagar</text>
+                      <text x="193" y="131" fontSize="9" fontWeight="bold" fill="rgba(255,255,255,0.72)" fontFamily="sans-serif">Taxi Booking · Itanagar</text>
                       <text x="193" y="147" fontSize="7.5" fill="rgba(255,255,255,0.32)" fontFamily="monospace">16 May 2026 · 14:30 · 2 pax</text>
                       <text x="193" y="161" fontSize="7.5" fill="rgba(255,255,255,0.32)" fontFamily="monospace">SUV / MUV</text>
                       <line x1="193" y1="170" x2="369" y2="170" stroke="rgba(255,218,0,0.1)" strokeWidth="0.6"/>

@@ -167,24 +167,24 @@ function formatDate(dateString: string) {
   })
 }
 
-function getStatusClass(status: string) {
+function getStatusClass(status: string, darkMode = false) {
   if (status === 'completed') {
-    return 'bg-green-100 text-green-800'
+    return darkMode ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/30' : 'bg-green-100 text-green-800'
   }
 
   if (status === 'confirmed') {
-    return 'bg-blue-100 text-blue-800'
+    return darkMode ? 'bg-blue-500/20 text-blue-200 border border-blue-500/30' : 'bg-blue-100 text-blue-800'
   }
 
   if (status === 'pending') {
-    return 'bg-yellow-100 text-yellow-800'
+    return darkMode ? 'bg-amber-500/20 text-amber-200 border border-amber-500/30' : 'bg-yellow-100 text-yellow-800'
   }
 
   if (status === 'cancelled') {
-    return 'bg-red-100 text-red-800'
+    return darkMode ? 'bg-rose-500/20 text-rose-200 border border-rose-500/30' : 'bg-red-100 text-red-800'
   }
 
-  return 'bg-gray-100 text-gray-800'
+  return darkMode ? 'bg-slate-500/20 text-slate-200 border border-slate-500/30' : 'bg-gray-100 text-gray-800'
 }
 
 function getPaymentStatusClass(status: string) {
@@ -2252,7 +2252,7 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      <div className="bg-white rounded-lg shadow-lg p-4 md:p-8">
+      <div className={`rounded-lg shadow-lg p-4 md:p-8 ${darkMode ? 'bg-slate-800/95 border border-slate-700/60' : 'bg-white'}`}>
         <h3 className="text-lg md:text-2xl font-bold mb-4 md:mb-6">Recent Bookings</h3>
 
         {loadingBookings ? (
@@ -2275,9 +2275,9 @@ export default function AdminDashboard() {
                   ? `Destination ID: ${booking.destination_id}`
                   : 'Route details unavailable'
               const cardShellClass = darkMode
-                ? 'border border-primary-700/70 bg-primary-900/50 shadow-lg shadow-black/10'
+                ? 'border border-slate-700/70 bg-slate-900/45 shadow-lg shadow-black/10'
                 : 'border border-slate-200 bg-white shadow-sm shadow-slate-200/70'
-              const summaryHoverClass = darkMode ? 'hover:bg-primary-800/50' : 'hover:bg-slate-50'
+              const summaryHoverClass = darkMode ? 'hover:bg-slate-800/70' : 'hover:bg-slate-50'
               const subtleTextClass = darkMode ? 'text-gray-400' : 'text-gray-500'
               const servicePillClass = darkMode
                 ? 'border border-cyan-500/30 bg-cyan-500/10 text-cyan-100'
@@ -2306,30 +2306,30 @@ export default function AdminDashboard() {
                           <p className={`text-xs font-mono mt-1 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>{displayId}...</p>
                         </div>
                         <div className="text-right shrink-0">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status)} inline-block mb-1`}>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status, darkMode)} inline-block mb-1`}>
                             {booking.booking_status || 'pending'}
                           </span>
                           <p className="text-xs font-semibold text-green-700">Rs. {toNum(booking.amount_total).toFixed(0)}</p>
-                          <p className="text-xs text-gray-500">{booking.start_datetime ? formatDate(booking.start_datetime) : '-'}</p>
+                          <p className={`text-xs ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>{booking.start_datetime ? formatDate(booking.start_datetime) : '-'}</p>
                         </div>
                       </div>
                       {/* Desktop: grid layout */}
                       <div className="hidden md:grid grid-cols-6 gap-3 items-center">
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Booking ID</p>
-                          <p className="font-mono text-xs text-blue-700">{displayId}…</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Booking ID</p>
+                          <p className={`font-mono text-xs ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>{displayId}…</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Customer</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Customer</p>
                           <p className="font-medium">{booking.user_name || '-'}</p>
-                          <p className="text-xs text-gray-500">{booking.phone || '-'}</p>
+                          <p className={`text-xs ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>{booking.phone || '-'}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Type</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Type</p>
                           <p>{bookingTypeLabel(booking.booking_type)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Start Date</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Start Date</p>
                           <p>{booking.start_datetime ? formatDate(booking.start_datetime) : '-'}</p>
                           <p className="text-xs text-gray-500">
                             {booking.start_datetime
@@ -2338,12 +2338,12 @@ export default function AdminDashboard() {
                           </p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Amount</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Amount</p>
                           <p className="font-semibold text-green-700">Rs. {toNum(booking.amount_total).toFixed(2)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Status</p>
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status)} inline-block`}>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Status</p>
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status, darkMode)} inline-block`}>
                             {booking.booking_status || 'pending'}
                           </span>
                         </div>
@@ -2438,7 +2438,14 @@ export default function AdminDashboard() {
               const hasDeletedAssignedCar = !!assignment && !assignedCar
 
               return (
-                <div key={booking.id} className="border rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                <div
+                  key={booking.id}
+                  className={`rounded-lg overflow-hidden border shadow-[0_1px_2px_rgba(15,23,42,0.05)] transition-[background-color,box-shadow,border-color] duration-300 ease-out ${
+                    darkMode
+                      ? `${isExpanded ? 'bg-slate-800/85' : 'bg-slate-900/70'} border-slate-600 hover:shadow-[0_8px_18px_rgba(2,6,23,0.45)]`
+                      : `${isExpanded ? 'bg-gray-100/90' : 'bg-white'} border-gray-300 hover:shadow-[0_8px_18px_rgba(15,23,42,0.08)]`
+                  }`}
+                >
                   {booking.cancellation_requested_at && booking.booking_status !== 'cancelled' && (
                     <div className="bg-orange-50 border-b border-orange-200 px-3 md:px-4 py-1.5 flex items-center gap-2 text-xs text-orange-700 font-semibold">
                       <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse shrink-0" />
@@ -2448,14 +2455,14 @@ export default function AdminDashboard() {
                   {/* Summary row — click to expand */}
                   <button
                     onClick={() => setExpandedBookingId(isExpanded ? null : booking.id)}
-                    className="w-full text-left p-3 md:p-4 hover:bg-gray-50 transition-colors flex items-center justify-between gap-2"
+                    className={`w-full text-left p-3 md:p-4 transition-colors flex items-center justify-between gap-2 ${darkMode ? 'hover:bg-slate-800/70' : 'hover:bg-gray-50/80'}`}
                   >
                     <div className="flex-1 min-w-0 text-sm">
                       {/* Mobile: stacked layout */}
                       <div className="flex items-start justify-between gap-2 md:hidden">
                         <div className="min-w-0">
                           <p className="font-medium truncate">{booking.user_name || '-'}</p>
-                          <p className="text-xs text-gray-500 truncate">
+                          <p className={`text-xs truncate ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>
                             {bookingTypeLabel(booking.booking_type)}
                             {compactServiceLabel ? ` - ${compactServiceLabel}` : ''}
                           </p>
@@ -2463,7 +2470,7 @@ export default function AdminDashboard() {
                           <p className="text-xs text-gray-400 font-mono mt-0.5">{displayId}…</p>
                         </div>
                         <div className="text-right shrink-0">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status)} inline-block mb-1`}>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status, darkMode)} inline-block mb-1`}>
                             {booking.booking_status
                               ? booking.booking_status.charAt(0).toUpperCase() + booking.booking_status.slice(1)
                               : 'Pending'}
@@ -2472,7 +2479,7 @@ export default function AdminDashboard() {
                             <p className={`text-xs font-semibold mb-1 ${
                               hasDeletedAssignedCar ? 'text-amber-700' : isCarAssigned ? 'text-green-700' : 'text-orange-600'
                             }`}>
-                              {hasDeletedAssignedCar ? 'Assigned Car Deleted' : isCarAssigned ? 'Car Assigned' : 'No Car'}
+                              {hasDeletedAssignedCar ? 'Assigned Car Deleted' : isCarAssigned ? 'Car Assigned' : 'Car not assigned'}
                             </p>
                           )}
                           <p className="text-xs font-semibold text-green-700">Rs. {toNum(booking.amount_total).toFixed(0)}</p>
@@ -2482,37 +2489,37 @@ export default function AdminDashboard() {
                       {/* Desktop: grid layout */}
                       <div className="hidden md:grid grid-cols-7 gap-3 items-center">
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Booking ID</p>
-                          <p className="font-mono text-xs text-blue-700">{displayId}…</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Booking ID</p>
+                          <p className={`font-mono text-xs ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>{displayId}…</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Customer</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Customer</p>
                           <p className="font-medium">{booking.user_name || '-'}</p>
-                          <p className="text-xs text-gray-500">{booking.phone || '-'}</p>
+                          <p className={`text-xs ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>{booking.phone || '-'}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Type</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Type</p>
                           <p>{bookingTypeLabel(booking.booking_type)}</p>
                           {compactServiceLabel && (
-                            <p className="text-xs text-gray-500 truncate">{compactServiceLabel}</p>
+                            <p className={`text-xs truncate ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>{compactServiceLabel}</p>
                           )}
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Start Date</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Start Date</p>
                           <p>{booking.start_datetime ? formatDate(booking.start_datetime) : '-'}</p>
-                          <p className="text-xs text-gray-500">
+                          <p className={`text-xs ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>
                             {booking.start_datetime
                               ? new Date(booking.start_datetime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
                               : ''}
                           </p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Amount</p>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Amount</p>
                           <p className="font-semibold text-green-700">Rs. {toNum(booking.amount_total).toFixed(2)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 font-semibold mb-0.5">Status</p>
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status)} inline-block`}>
+                          <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Status</p>
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status, darkMode)} inline-block`}>
                             {booking.booking_status
                               ? booking.booking_status.charAt(0).toUpperCase() + booking.booking_status.slice(1)
                               : 'Pending'}
@@ -2520,7 +2527,7 @@ export default function AdminDashboard() {
                         </div>
                         {booking.booking_status === 'confirmed' && (
                           <div>
-                            <p className="text-xs text-gray-500 font-semibold mb-0.5">Vehicle</p>
+                            <p className={`text-xs font-semibold mb-0.5 ${darkMode ? 'text-slate-300' : 'text-gray-500'}`}>Vehicle</p>
                             <span className={`px-2 py-1 rounded-full text-xs font-semibold inline-block ${
                               hasDeletedAssignedCar
                                 ? 'bg-amber-100 text-amber-800'
@@ -2528,7 +2535,7 @@ export default function AdminDashboard() {
                                   ? 'bg-green-100 text-green-800'
                                   : 'bg-orange-100 text-orange-800'
                             }`}>
-                              {hasDeletedAssignedCar ? 'Car Deleted' : isCarAssigned ? 'Assigned' : 'Not Assigned'}
+                              {hasDeletedAssignedCar ? 'Car Deleted' : isCarAssigned ? 'Assigned' : 'Car not assigned'}
                             </span>
                           </div>
                         )}
@@ -2544,16 +2551,36 @@ export default function AdminDashboard() {
 
                   {/* Expanded detail panel */}
                   {isExpanded && (
-                    <div className="border-t bg-gray-50 p-3 md:p-5">
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+                    <div className="border-t border-gray-200 bg-gray-50/60 p-3 md:p-5">
+                      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 md:gap-5 xl:items-stretch">
 
                         {/* ── Booking Details ── */}
-                        <div className="bg-white rounded-lg border p-4">
+                        <div className="bg-white rounded-lg border border-gray-300 shadow-[0_1px_2px_rgba(15,23,42,0.06)] p-4 xl:col-span-5 xl:h-full">
                           <h4 className="font-semibold text-base mb-3 text-gray-800">Booking Details</h4>
                           <dl className="space-y-2 text-sm">
                             <div className="flex justify-between gap-2">
                               <dt className="text-gray-500 shrink-0">booking_id</dt>
-                              <dd className="font-mono text-xs text-right break-all">{booking.booking_id || '-'}</dd>
+                              <dd className="text-right">
+                                {booking.booking_id ? (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        await navigator.clipboard.writeText(booking.booking_id || '')
+                                        toast.success('Booking ID copied')
+                                      } catch {
+                                        toast.error('Failed to copy Booking ID')
+                                      }
+                                    }}
+                                    className={`font-mono text-xs break-all hover:underline underline-offset-2 ${darkMode ? 'text-blue-300 hover:text-blue-200' : 'text-blue-700 hover:text-blue-800'}`}
+                                    title="Click to copy booking ID"
+                                  >
+                                    {booking.booking_id}
+                                  </button>
+                                ) : (
+                                  <span className="font-mono text-xs">-</span>
+                                )}
+                              </dd>
                             </div>
                             <div className="flex justify-between gap-2">
                               <dt className="text-gray-500 shrink-0">booking_type</dt>
@@ -2601,7 +2628,21 @@ export default function AdminDashboard() {
                                 <dt className="text-gray-500 shrink-0">destination_id</dt>
                                 <dd className="text-right">
                                   <div className="font-medium">{destinationName || 'Destination unavailable'}</div>
-                                  <div className="font-mono text-xs break-all">{booking.destination_id}</div>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        await navigator.clipboard.writeText(booking.destination_id || '')
+                                        toast.success('Destination ID copied')
+                                      } catch {
+                                        toast.error('Failed to copy Destination ID')
+                                      }
+                                    }}
+                                    className={`font-mono text-xs break-all hover:underline underline-offset-2 ${darkMode ? 'text-blue-300 hover:text-blue-200' : 'text-blue-700 hover:text-blue-800'}`}
+                                    title="Click to copy destination ID"
+                                  >
+                                    {booking.destination_id}
+                                  </button>
                                 </dd>
                               </div>
                             )}
@@ -2612,7 +2653,7 @@ export default function AdminDashboard() {
                             <div className="flex justify-between gap-2">
                               <dt className="text-gray-500 shrink-0">booking_status</dt>
                               <dd>
-                                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status)}`}>
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusClass(booking.booking_status, darkMode)}`}>
                                   {booking.booking_status || 'pending'}
                                 </span>
                               </dd>
@@ -2773,10 +2814,20 @@ export default function AdminDashboard() {
                           const carClass = assignedCar?.class || assignment?.car_class_snapshot || '-'
                           const driverName = assignedCar?.driver_name || assignment?.driver_name_snapshot || '-'
                           const driverPhone = assignedCar?.driver_phone || assignment?.driver_phone_snapshot || '-'
+                          const carCapacity = assignedCar?.capacity
+                          const carIsActive = assignedCar?.is_active
+                          const driverEmail = assignedCar?.driver_email || assignment?.driver_email_snapshot || '-'
+                          const driverVerified = assignedCar?.driver_verified
+                          const vehicleDataSource = assignedCar ? 'Live vehicle record' : 'Assignment snapshot'
                           
                           return assignment ? (
-                            <div className="bg-green-50 rounded-lg border border-green-200 p-4">
+                            <div className="bg-green-50 rounded-lg border border-green-200 shadow-[0_1px_2px_rgba(15,23,42,0.05)] p-4 xl:col-span-7 xl:h-full flex flex-col">
                               <h4 className="font-semibold text-base mb-3 text-green-800">✓ Vehicle Assignment</h4>
+                              <div className="mb-3">
+                                <span className="rounded-full border border-green-300 bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800">
+                                  {vehicleDataSource}
+                                </span>
+                              </div>
                               <dl className="space-y-2 text-sm">
                                 <div className="flex justify-between gap-2">
                                   <dt className="text-gray-600 shrink-0">Car Model</dt>
@@ -2791,12 +2842,48 @@ export default function AdminDashboard() {
                                   <dd>{carClass}</dd>
                                 </div>
                                 <div className="flex justify-between gap-2">
+                                  <dt className="text-gray-600 shrink-0">Capacity</dt>
+                                  <dd>{carCapacity ?? '-'}</dd>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <dt className="text-gray-600 shrink-0">Vehicle Status</dt>
+                                  <dd>
+                                    {carIsActive === undefined
+                                      ? '-'
+                                      : carIsActive
+                                        ? 'Active'
+                                        : 'Inactive'}
+                                  </dd>
+                                </div>
+                                <div className="flex justify-between gap-2">
                                   <dt className="text-gray-600 shrink-0">Driver</dt>
                                   <dd>{driverName}</dd>
                                 </div>
                                 <div className="flex justify-between gap-2">
                                   <dt className="text-gray-600 shrink-0">Driver Phone</dt>
                                   <dd className="font-mono">{driverPhone}</dd>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <dt className="text-gray-600 shrink-0">Driver Email</dt>
+                                  <dd className="text-right break-all">{driverEmail || '-'}</dd>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <dt className="text-gray-600 shrink-0">Driver Verified</dt>
+                                  <dd>
+                                    {driverVerified === undefined
+                                      ? '-'
+                                      : driverVerified
+                                        ? 'Yes'
+                                        : 'No'}
+                                  </dd>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <dt className="text-gray-600 shrink-0">Assignment Start</dt>
+                                  <dd className="text-right text-xs">{new Date(assignment.start_datetime).toLocaleString('en-IN')}</dd>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <dt className="text-gray-600 shrink-0">Assignment End</dt>
+                                  <dd className="text-right text-xs">{new Date(assignment.end_datetime).toLocaleString('en-IN')}</dd>
                                 </div>
                                 {!assignedCar && (
                                   <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
@@ -2810,13 +2897,13 @@ export default function AdminDashboard() {
                               </dl>
                               <button
                                 onClick={() => openVehicleAssignmentModal(bookingPayment, booking)}
-                                className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm"
+                                className="w-full mt-4 xl:mt-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm"
                               >
                                 Reassign Vehicle
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-col items-center justify-center bg-gray-50 border border-gray-200 rounded-lg p-6 text-center gap-4">
+                            <div className="flex flex-col items-center justify-center bg-gray-50 border border-gray-200 rounded-lg p-6 text-center gap-4 xl:col-span-7 xl:h-full">
                               <p className="text-sm text-gray-600">No vehicle assigned yet</p>
                               {bookingPayment?.payment_status === 'paid' && (
                                 <button
@@ -2832,9 +2919,45 @@ export default function AdminDashboard() {
 
                         {/* ── Payment Details ── */}
                         {bookingPayment ? (
-                          <div className="bg-white rounded-lg border p-4">
-                            <h4 className="font-semibold text-base mb-3 text-gray-800">Payment Details</h4>
-                            <dl className="space-y-2 text-sm">
+                          <div className="bg-white rounded-lg border border-gray-300 shadow-[0_1px_2px_rgba(15,23,42,0.06)] p-4 xl:col-span-12">
+                            <details className="group">
+                            <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
+                              <div>
+                                <h4 className="font-semibold text-base text-gray-800">Payment Details</h4>
+                                <p className="text-xs text-gray-500 mt-0.5">Collection status and transaction trail</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`w-fit px-2.5 py-1 rounded-full text-xs font-semibold ${getPaymentStatusClass(bookingPayment.payment_status)}`}>
+                                  {bookingPayment.payment_status}
+                                </span>
+                                <span className="text-gray-400 transition-transform group-open:rotate-180">⌄</span>
+                              </div>
+                            </summary>
+                            <div className="mt-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                              <div className="rounded-lg border border-green-100 bg-green-50 p-3">
+                                <p className="text-xs font-semibold text-green-700">Collected</p>
+                                <p className="text-lg font-bold text-green-800">
+                                  Rs. {(toNum(bookingPayment.amount_online_paid) + toNum(bookingPayment.amount_cash_paid)).toFixed(2)}
+                                </p>
+                              </div>
+                              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                                <p className="text-xs font-semibold text-blue-700">Online Paid</p>
+                                <p className="text-lg font-bold text-blue-800">Rs. {toNum(bookingPayment.amount_online_paid).toFixed(2)}</p>
+                              </div>
+                              <div className="rounded-lg border border-orange-100 bg-orange-50 p-3">
+                                <p className="text-xs font-semibold text-orange-700">Balance</p>
+                                <p className="text-lg font-bold text-orange-800">
+                                  Rs. {Math.max(0, toNum(bookingPayment.amount_total) - (toNum(bookingPayment.amount_online_paid) + toNum(bookingPayment.amount_cash_paid))).toFixed(2)}
+                                </p>
+                              </div>
+                            </div>
+                            <details className="group rounded-lg border border-gray-200 bg-gray-50/70" open>
+                              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-semibold text-gray-700">
+                                Transaction breakdown
+                                <span className="text-gray-400 transition-transform group-open:rotate-180">⌄</span>
+                              </summary>
+                              <dl className="space-y-2 border-t border-gray-200 bg-white px-3 py-3 text-sm">
                               <div className="flex justify-between gap-2">
                                 <dt className="text-gray-500 shrink-0">payment_type</dt>
                                 <dd className="font-medium capitalize">{bookingPayment.payment_type}</dd>
@@ -2941,10 +3064,13 @@ export default function AdminDashboard() {
                                   </button>
                                 </div>
                               )}
-                            </dl>
+                              </dl>
+                            </details>
+                            </div>
+                            </details>
                           </div>
                         ) : (
-                          <div className="flex items-center justify-center bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+                          <div className="flex items-center justify-center bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center xl:col-span-12">
                             <p className="text-sm text-yellow-800">No payment record linked to this booking.</p>
                           </div>
                         )}
@@ -6125,7 +6251,7 @@ export default function AdminDashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-1.5 md:gap-2 mb-3 md:mb-4">
           <select
-            className="input-field text-[12px] md:text-sm h-9 md:h-10 px-2.5"
+            className="input-field text-[12px] md:text-sm h-10 min-h-[2.5rem] px-2.5 leading-6 pt-0.5 pb-2"
             value={logsSeverity}
             onChange={(e) => { setLogsPage(1); setLogsSeverity(e.target.value as 'all' | 'info' | 'warn' | 'error' | 'security') }}
           >
@@ -6137,14 +6263,14 @@ export default function AdminDashboard() {
           </select>
 
           <input
-            className="input-field text-[12px] md:text-sm h-9 md:h-10 px-2.5"
+            className="input-field text-[12px] md:text-sm h-10 min-h-[2.5rem] px-2.5 leading-6"
             placeholder="Event type (exact)"
             value={logsEventType}
             onChange={(e) => { setLogsPage(1); setLogsEventType(e.target.value) }}
           />
 
           <input
-            className="input-field text-[12px] md:text-sm h-9 md:h-10 px-2.5 md:col-span-2"
+            className="input-field text-[12px] md:text-sm h-10 min-h-[2.5rem] px-2.5 leading-6 md:col-span-2"
             placeholder="Search message, actor, entity..."
             value={logsQuery}
             onChange={(e) => { setLogsPage(1); setLogsQuery(e.target.value) }}

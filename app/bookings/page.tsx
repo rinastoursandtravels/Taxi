@@ -237,9 +237,10 @@ export default function MyBookings() {
             scrollTrigger: {
               trigger: card,
               scroller: scrollRef.current,
-              start: 'top 92%',
-              end: 'bottom 8%',
-              toggleActions: 'play reverse play reverse',
+              start: 'top 105%',
+              end: 'bottom -5%',
+              toggleActions: 'play none play reverse',
+              invalidateOnRefresh: true,
             }
           }
         )
@@ -248,6 +249,19 @@ export default function MyBookings() {
 
     return () => ctx.revert()
   }, [loadingBookings, bookings])
+
+  useEffect(() => {
+    if (loadingBookings || bookings.length === 0) return
+
+    // Card height changes after expand/collapse can shift neighboring triggers.
+    // Refresh after layout settles so each card exits only when it truly leaves the viewport.
+    const raf = requestAnimationFrame(() => ScrollTrigger.refresh())
+    const timeout = window.setTimeout(() => ScrollTrigger.refresh(), 300)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.clearTimeout(timeout)
+    }
+  }, [expandedBookingId, loadingBookings, bookings.length])
 
   const loadBookings = async (email: string) => {
     setLoadingBookings(true)
