@@ -24,8 +24,6 @@ type Car = {
   driver_name: string
   driver_phone: string
   driver_email: string | null
-  driver_license_number: string | null
-  driver_license_expiry: string | null
   driver_verified: boolean
   is_active: boolean
   created_at: string
@@ -212,6 +210,30 @@ function compactLabel(value: string | null | undefined, maxLength = 18) {
   return `${text.slice(0, maxLength)}...`
 }
 
+function getCarClassFromCapacity(capacityValue: string | number): string {
+  const capacity = typeof capacityValue === 'number' ? capacityValue : parseInt(capacityValue, 10)
+  if (!Number.isFinite(capacity) || capacity <= 0) return 'Economy'
+  if (capacity <= 4) return 'Economy'
+  if (capacity <= 6) return 'Premium'
+  if (capacity <= 8) return 'Luxury'
+  return 'Group'
+}
+
+function getMostCommonValue<T extends string | number>(values: T[]): T | null {
+  if (values.length === 0) return null
+  const counts = new Map<T, number>()
+  values.forEach((v) => counts.set(v, (counts.get(v) || 0) + 1))
+  let winner = values[0]
+  let maxCount = 0
+  counts.forEach((count, value) => {
+    if (count > maxCount) {
+      maxCount = count
+      winner = value
+    }
+  })
+  return winner
+}
+
 function levenshtein(a: string, b: string): number {
   const m = a.length, n = b.length
   const dp: number[][] = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)])
@@ -378,8 +400,6 @@ export default function AdminDashboard() {
     driver_name: '',
     driver_phone: '',
     driver_email: '',
-    driver_license_number: '',
-    driver_license_expiry: '',
     driver_verified: false,
   })
   const [destinationData, setDestinationData] = useState({
@@ -926,6 +946,27 @@ export default function AdminDashboard() {
     setLastCarModelSuggestionSource(referenceMatches.length > 0 ? 'library' : null)
   }
 
+  const autoFillCarSpecsFromModel = (rawModelName: string) => {
+    if (editingCar) return
+    const modelName = rawModelName.trim()
+    if (!modelName) return
+
+    const exactMatches = cars.filter(
+      (car) => normalizeModel(car.model_name) === normalizeModel(modelName)
+    )
+    if (exactMatches.length === 0) return
+
+    const commonCapacity = getMostCommonValue(exactMatches.map((car) => car.capacity))
+    const commonClass = getMostCommonValue(exactMatches.map((car) => car.class))
+
+    setFormData((prev) => ({
+      ...prev,
+      model_name: modelName,
+      capacity: commonCapacity ? String(commonCapacity) : prev.capacity,
+      class: commonClass || prev.class,
+    }))
+  }
+
   const loadDestinations = async () => {
     setLoadingDestinations(true)
 
@@ -1421,16 +1462,18 @@ export default function AdminDashboard() {
   const handleAddCar = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.model_name || !formData.class || !formData.number_plate || !formData.capacity || !formData.driver_name || !formData.driver_phone) {
+    if (!formData.model_name || !formData.number_plate || !formData.capacity || !formData.driver_name || !formData.driver_phone) {
       toast.error('Please fill all required fields')
       return
     }
+
+    const resolvedClass = formData.class || getCarClassFromCapacity(formData.capacity)
 
     try {
       const response = await fetch('/api/cars', {
         method: 'POST',
         headers: adminHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, class: resolvedClass }),
       })
 
       const result = await response.json()
@@ -1452,8 +1495,6 @@ export default function AdminDashboard() {
         driver_name: '',
         driver_phone: '',
         driver_email: '',
-        driver_license_number: '',
-        driver_license_expiry: '',
         driver_verified: false,
       })
       setShowAddCar(false)
@@ -1469,16 +1510,18 @@ export default function AdminDashboard() {
 
     if (!editingCar) return
 
-    if (!formData.model_name || !formData.class || !formData.number_plate || !formData.capacity || !formData.driver_name || !formData.driver_phone) {
+    if (!formData.model_name || !formData.number_plate || !formData.capacity || !formData.driver_name || !formData.driver_phone) {
       toast.error('Please fill all required fields')
       return
     }
+
+    const resolvedClass = formData.class || getCarClassFromCapacity(formData.capacity)
 
     try {
       const response = await fetch(`/api/cars/${editingCar.id}`, {
         method: 'PUT',
         headers: adminHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, class: resolvedClass }),
       })
 
       const result = await response.json()
@@ -1500,8 +1543,6 @@ export default function AdminDashboard() {
         driver_name: '',
         driver_phone: '',
         driver_email: '',
-        driver_license_number: '',
-        driver_license_expiry: '',
         driver_verified: false,
       })
       setEditingCar(null)
@@ -1577,8 +1618,6 @@ export default function AdminDashboard() {
       driver_name: car.driver_name,
       driver_phone: car.driver_phone,
       driver_email: car.driver_email || '',
-      driver_license_number: car.driver_license_number || '',
-      driver_license_expiry: car.driver_license_expiry || '',
       driver_verified: car.driver_verified,
     })
     setShowAddCar(false)
@@ -1598,8 +1637,6 @@ export default function AdminDashboard() {
       driver_name: '',
       driver_phone: '',
       driver_email: '',
-      driver_license_number: '',
-      driver_license_expiry: '',
       driver_verified: false,
     })
     setShowAddCar(false)
@@ -2867,9 +2904,15 @@ export default function AdminDashboard() {
                 const nextValue = e.target.value
                 setFormData({ ...formData, model_name: nextValue })
                 updateCarModelSuggestions(nextValue)
+                if (showAddCar && !editingCar) {
+                  autoFillCarSpecsFromModel(nextValue)
+                }
               }}
               onBlur={(e) => {
                 updateCarModelSuggestions(e.target.value)
+                if (showAddCar && !editingCar) {
+                  autoFillCarSpecsFromModel(e.target.value)
+                }
               }}
               required
             />
@@ -2892,6 +2935,9 @@ export default function AdminDashboard() {
                       type="button"
                       onClick={() => {
                         setFormData(f => ({ ...f, model_name: name }))
+                        if (showAddCar && !editingCar) {
+                          autoFillCarSpecsFromModel(name)
+                        }
                         setCarModelWarning([])
                         setCarModelWarningSource(null)
                         setLastCarModelSuggestions([])
@@ -2931,14 +2977,50 @@ export default function AdminDashboard() {
               </div>
             )}
           </div>
-          <input
-            type="text"
-            placeholder="Class (e.g., Premium, Economy, Luxury)"
-            className="input-field"
-            value={formData.class}
-            onChange={(e) => setFormData({ ...formData, class: e.target.value })}
-            required
-          />
+          <div className="md:col-span-2">
+            <p className="mb-2 text-sm font-semibold text-gray-700">Car Class</p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {[
+                { label: 'Auto', value: '' },
+                { label: 'Economy', value: 'Economy' },
+                { label: 'Premium', value: 'Premium' },
+                { label: 'Luxury', value: 'Luxury' },
+                { label: 'Group', value: 'Group' },
+              ].map((option) => {
+                const checked = formData.class === option.value
+                return (
+                  <label
+                    key={option.label}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
+                      checked ? 'border-secondary-400 bg-secondary-50' : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setFormData({
+                          ...formData,
+                          class: checked ? '' : option.value,
+                        })
+                      }
+                      className="h-4 w-4 accent-secondary-500"
+                    />
+                    <span className="text-sm text-gray-800">{option.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              If no class is selected (or Auto is selected), class will be auto-assigned from capacity.
+            </p>
+            <details className="mt-1 text-xs text-gray-500">
+              <summary className="cursor-pointer select-none">Capacity to class mapping</summary>
+              <div className="mt-1 whitespace-pre-line">
+                {"<= 4 → Economy\n<= 6 → Premium\n<= 8 → Luxury\n> 8 → Group"}
+              </div>
+            </details>
+          </div>
           <input
             type="text"
             placeholder="Number Plate (e.g., AP-01-XY-1234)"
@@ -2983,20 +3065,6 @@ export default function AdminDashboard() {
             className="input-field"
             value={formData.driver_email}
             onChange={(e) => setFormData({ ...formData, driver_email: e.target.value })}
-          />
-          <input
-            type="text"
-            placeholder="License Number"
-            className="input-field"
-            value={formData.driver_license_number}
-            onChange={(e) => setFormData({ ...formData, driver_license_number: e.target.value })}
-          />
-          <input
-            type="date"
-            placeholder="License Expiry Date"
-            className="input-field"
-            value={formData.driver_license_expiry}
-            onChange={(e) => setFormData({ ...formData, driver_license_expiry: e.target.value })}
           />
           <div className="flex items-center">
             <label className="flex items-center gap-2 cursor-pointer">
@@ -3259,18 +3327,6 @@ export default function AdminDashboard() {
                                   <p className="text-gray-800">{car.driver_email || '—'}</p>
                                 </div>
                                 <div>
-                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">License Number</p>
-                                  <p className="text-gray-800 font-mono">{car.driver_license_number || '—'}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">License Expiry</p>
-                                  <p className="text-gray-800">
-                                    {car.driver_license_expiry
-                                      ? new Date(car.driver_license_expiry).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-                                      : '—'}
-                                  </p>
-                                </div>
-                                <div>
                                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Driver Verified</p>
                                   <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
                                     car.driver_verified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
@@ -3361,17 +3417,6 @@ export default function AdminDashboard() {
                             <p className="text-xs text-gray-500 mt-0.5">{car.driver_phone}</p>
                             {car.driver_email && <p className="text-xs text-gray-500">{car.driver_email}</p>}
                           </div>
-                          {car.driver_license_number && (
-                            <div className="pt-2 border-t border-gray-100">
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">License</p>
-                              <p className="text-xs font-mono text-gray-600">{car.driver_license_number}</p>
-                              {car.driver_license_expiry && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  Expires: {new Date(car.driver_license_expiry).toLocaleDateString('en-IN')}
-                                </p>
-                              )}
-                            </div>
-                          )}
                         </div>
 
                         {/* Card Actions */}

@@ -71,8 +71,6 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       driver_name,
       driver_phone,
       driver_email,
-      driver_license_number,
-      driver_license_expiry,
       driver_verified,
     } = body
 
@@ -86,8 +84,6 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         driver_name,
         driver_phone,
         driver_email: driver_email || null,
-        driver_license_number: driver_license_number || null,
-        driver_license_expiry: driver_license_expiry || null,
         driver_verified: driver_verified || false,
       })
       .eq('id', id)

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, memo, Fragment } from 'react'
 import Header from '@/components/Header'
-import { Users, Search, X, MapPin, Calendar, Clock, Car, User, Mail, Phone, Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Users, Search, X, MapPin, Calendar, Clock, Car, User, Mail, Phone, Check, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 import PhoneInput from '@/components/PhoneInput'
 import AuthGate from '@/components/AuthGate'
 import toast from 'react-hot-toast'
@@ -136,8 +136,11 @@ export default function BookTaxi() {
   const [showTimePicker, setShowTimePicker] = useState(false)
 
   const [destinationSearch, setDestinationSearch] = useState('')
-  const [destinationSortOrder, setDestinationSortOrder] = useState<'default' | 'asc' | 'desc'>('default')
+  const [destinationSortOrder, setDestinationSortOrder] = useState<'default' | 'asc' | 'desc' | 'durationAsc' | 'durationDesc'>('default')
+  const [showDestinationSortMenu, setShowDestinationSortMenu] = useState(false)
   const [carSearch, setCarSearch] = useState('')
+  const [carSortOrder, setCarSortOrder] = useState<'default' | 'priceAsc' | 'priceDesc' | 'nameAsc' | 'nameDesc' | 'capacityAsc' | 'capacityDesc'>('default')
+  const [showCarSortMenu, setShowCarSortMenu] = useState(false)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -213,14 +216,55 @@ export default function BookTaxi() {
     if (destinationSortOrder === 'desc') {
       return [...filtered].sort((a, b) => b.name.localeCompare(a.name, 'en', { sensitivity: 'base' }))
     }
+    if (destinationSortOrder === 'durationAsc') {
+      return [...filtered].sort((a, b) => a.estimated_duration_minutes - b.estimated_duration_minutes)
+    }
+    if (destinationSortOrder === 'durationDesc') {
+      return [...filtered].sort((a, b) => b.estimated_duration_minutes - a.estimated_duration_minutes)
+    }
     return filtered
   }, [destinations, destinationSearch, destinationSortOrder])
 
   const filteredCars = useMemo(() => {
-    if (!carSearch.trim()) return availableCarModels
-    const q = carSearch.toLowerCase()
-    return availableCarModels.filter((c) => c.model_name.toLowerCase().includes(q) || c.class.toLowerCase().includes(q))
-  }, [availableCarModels, carSearch])
+    const q = carSearch.trim().toLowerCase()
+    const filtered = q
+      ? availableCarModels.filter((c) => c.model_name.toLowerCase().includes(q) || c.class.toLowerCase().includes(q))
+      : [...availableCarModels]
+
+    if (carSortOrder === 'priceAsc') {
+      filtered.sort((a, b) => Number(a.fixed_fare) - Number(b.fixed_fare))
+    } else if (carSortOrder === 'priceDesc') {
+      filtered.sort((a, b) => Number(b.fixed_fare) - Number(a.fixed_fare))
+    } else if (carSortOrder === 'nameAsc') {
+      filtered.sort((a, b) => a.model_name.localeCompare(b.model_name, 'en', { sensitivity: 'base' }))
+    } else if (carSortOrder === 'nameDesc') {
+      filtered.sort((a, b) => b.model_name.localeCompare(a.model_name, 'en', { sensitivity: 'base' }))
+    } else if (carSortOrder === 'capacityAsc') {
+      filtered.sort((a, b) => a.capacity - b.capacity)
+    } else if (carSortOrder === 'capacityDesc') {
+      filtered.sort((a, b) => b.capacity - a.capacity)
+    }
+
+    return filtered
+  }, [availableCarModels, carSearch, carSortOrder])
+
+  const carSortLabelMap: Record<typeof carSortOrder, string> = {
+    default: 'Sort: Default',
+    priceAsc: 'Price: Low to High',
+    priceDesc: 'Price: High to Low',
+    nameAsc: 'Name: A to Z',
+    nameDesc: 'Name: Z to A',
+    capacityAsc: 'Capacity: Low to High',
+    capacityDesc: 'Capacity: High to Low',
+  }
+
+  const destinationSortLabelMap: Record<typeof destinationSortOrder, string> = {
+    default: 'Sort: Default',
+    asc: 'Name: A to Z',
+    desc: 'Name: Z to A',
+    durationAsc: 'Duration: Short to Long',
+    durationDesc: 'Duration: Long to Short',
+  }
 
   const currentStepIndex = AIRPORT_STEPS.indexOf(step)
   const totalCost = selectedCarModel ? Number(selectedCarModel.fixed_fare || 0) : 0
@@ -457,14 +501,14 @@ export default function BookTaxi() {
                     color: '#ffffff !important',
                   },
                   '& .MuiPickerDay-root.Mui-selected, & .MuiPickersDay-root.Mui-selected': {
-                    backgroundColor: '#0066ff',
-                    color: '#ffffff !important',
-                    WebkitTextFillColor: '#ffffff',
+                    backgroundColor: '#FFD60A',
+                    color: '#1a120f !important',
+                    WebkitTextFillColor: '#1a120f',
                     fontWeight: 800,
                   },
                   '& .MuiPickerDay-root.Mui-selected:hover, & .MuiPickersDay-root.Mui-selected:hover': {
-                    backgroundColor: '#0052cc',
-                    color: '#ffffff !important',
+                    backgroundColor: '#e6bf09',
+                    color: '#1a120f !important',
                   },
                   '& .MuiPickerDay-root.Mui-disabled, & .MuiPickersDay-root.Mui-disabled': {
                     color: 'rgba(241, 245, 249, 0.82) !important',
@@ -710,21 +754,43 @@ export default function BookTaxi() {
                             <MapPin className="h-5 w-5 text-secondary-300" />
                             Select Destination
                           </label>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setDestinationSortOrder((v) =>
-                                v === 'default' ? 'asc' : v === 'asc' ? 'desc' : 'default'
-                              )
-                            }
-                            className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors ${
-                              destinationSortOrder !== 'default'
-                                ? 'border-secondary-400 bg-secondary-500/20 text-secondary-100'
-                                : 'border-white/20 bg-white/[0.03] text-gray-300 hover:border-secondary-400/50'
-                            }`}
-                          >
-                            {destinationSortOrder === 'asc' ? 'A-Z' : destinationSortOrder === 'desc' ? 'Z-A' : 'Sort'}
-                          </button>
+                          <div className="relative min-w-[140px] sm:min-w-[170px]">
+                            <button
+                              type="button"
+                              onClick={() => setShowDestinationSortMenu((v) => !v)}
+                              className="flex w-full items-center justify-between rounded-xl border border-white/20 bg-gradient-to-b from-white/[0.09] to-white/[0.03] px-2.5 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-medium text-gray-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-all hover:border-secondary-300/50 focus:outline-none focus:ring-2 focus:ring-secondary-400/70"
+                            >
+                              <span className="truncate whitespace-nowrap">{destinationSortLabelMap[destinationSortOrder]}</span>
+                              <ChevronDown className={`h-4 w-4 text-gray-300 transition-transform ${showDestinationSortMenu ? 'rotate-180' : ''}`} />
+                            </button>
+                            {showDestinationSortMenu && (
+                              <div className="absolute right-0 z-30 mt-2 w-full overflow-hidden rounded-xl border border-white/15 bg-[#1f1715] shadow-xl">
+                                {([
+                                  ['default', 'Sort: Default'],
+                                  ['asc', 'Name: A to Z'],
+                                  ['desc', 'Name: Z to A'],
+                                  ['durationAsc', 'Duration: Short to Long'],
+                                  ['durationDesc', 'Duration: Long to Short'],
+                                ] as const).map(([value, label]) => (
+                                  <button
+                                    key={value}
+                                    type="button"
+                                    onClick={() => {
+                                      setDestinationSortOrder(value)
+                                      setShowDestinationSortMenu(false)
+                                    }}
+                                    className={`block w-full px-3 py-2 text-left text-sm transition-colors ${
+                                      destinationSortOrder === value
+                                        ? 'bg-secondary-500/25 text-secondary-100'
+                                        : 'text-gray-200 hover:bg-white/10'
+                                    }`}
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
                         <div className="relative mb-1">
                           <Search className="absolute left-4 top-3.5 h-4 w-4 text-gray-400" />
@@ -732,7 +798,7 @@ export default function BookTaxi() {
                             value={destinationSearch}
                             onChange={(e) => setDestinationSearch(e.target.value)}
                             placeholder="Search destination..."
-                            className="w-full rounded-xl border border-white/15 bg-white/[0.05] py-3 pl-12 pr-4 text-white placeholder:text-gray-500 focus:border-secondary-400 focus:bg-white/[0.08] focus:outline-none transition-colors"
+                            className="w-full rounded-xl border border-white/15 bg-white/[0.05] py-2.5 sm:py-3 pl-11 sm:pl-12 pr-4 text-sm text-white placeholder:text-gray-500 focus:border-secondary-400 focus:bg-white/[0.08] focus:outline-none transition-colors"
                           />
                           {destinationSearch && (
                             <button 
@@ -845,32 +911,83 @@ export default function BookTaxi() {
                         Select Car Type
                       </label>
 
+                      <div className="grid grid-cols-[1fr_150px] md:grid-cols-[1fr_220px] gap-2 md:gap-3">
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                          <input
+                            value={carSearch}
+                            onChange={(e) => setCarSearch(e.target.value)}
+                            placeholder="Search car model or class..."
+                            className="w-full rounded-xl border border-white/20 bg-white/[0.05] py-2 sm:py-2.5 pl-9 pr-3 text-xs sm:text-sm text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-secondary-400/60"
+                          />
+                        </div>
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setShowCarSortMenu((v) => !v)}
+                            className="flex w-full items-center justify-between rounded-xl border border-white/20 bg-gradient-to-b from-white/[0.09] to-white/[0.03] px-2.5 sm:px-3 py-2 sm:py-2.5 text-[11px] sm:text-sm font-medium text-gray-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-all hover:border-secondary-300/50 focus:outline-none focus:ring-2 focus:ring-secondary-400/70"
+                          >
+                            <span className="truncate whitespace-nowrap">{carSortLabelMap[carSortOrder]}</span>
+                            <ChevronDown className={`h-4 w-4 text-gray-300 transition-transform ${showCarSortMenu ? 'rotate-180' : ''}`} />
+                          </button>
+                          {showCarSortMenu && (
+                            <div className="absolute right-0 z-30 mt-2 w-full overflow-hidden rounded-xl border border-white/15 bg-[#1f1715] shadow-xl">
+                              {([
+                                ['default', 'Sort: Default'],
+                                ['priceAsc', 'Price: Low to High'],
+                                ['priceDesc', 'Price: High to Low'],
+                                ['nameAsc', 'Name: A to Z'],
+                                ['nameDesc', 'Name: Z to A'],
+                                ['capacityAsc', 'Capacity: Low to High'],
+                                ['capacityDesc', 'Capacity: High to Low'],
+                              ] as const).map(([value, label]) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  onClick={() => {
+                                    setCarSortOrder(value)
+                                    setShowCarSortMenu(false)
+                                  }}
+                                  className={`block w-full px-3 py-2 text-left text-sm transition-colors ${
+                                    carSortOrder === value
+                                      ? 'bg-secondary-500/25 text-secondary-100'
+                                      : 'text-gray-200 hover:bg-white/10'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
                       {loadingCars ? (
                         <div className="flex items-center justify-center py-8">
                           <p className="text-gray-300">Loading available cars...</p>
                         </div>
                       ) : availableCarModels.length > 0 ? (
-                        <div className="space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 md:gap-3">
                           {filteredCars.map((c) => (
                             <button
                               key={c.model_name}
                               type="button"
                               onClick={() => setSelectedCarModel(c)}
-                              className={`relative rounded-xl border-2 px-4 py-4 text-left transition-all duration-200 ${
+                              className={`relative h-full rounded-xl border-2 px-3.5 py-3.5 md:px-4 md:py-3.5 text-left transition-all duration-200 ${
                                 selectedCarModel?.model_name === c.model_name
                                   ? 'border-secondary-400 bg-secondary-500/15 shadow-[0_0_20px_rgba(255,214,10,0.15)]'
                                   : 'border-white/15 bg-white/[0.03] hover:border-secondary-400/50 hover:bg-white/[0.06]'
                               }`}
                             >
-                              <div className="flex items-center justify-between">
+                              <div className="flex flex-col gap-2 sm:gap-2.5">
                                 <div className="flex-1">
-                                  <p className="font-bold text-white text-sm md:text-base">{c.model_name}</p>
-                                  <p className="mt-1 text-xs md:text-sm text-gray-400">
+                                  <p className="font-bold text-white text-sm md:text-[15px]">{c.model_name}</p>
+                                  <p className="mt-1 text-xs md:text-[13px] text-gray-400">
                                     {c.class} • {c.capacity} {c.capacity === 1 ? 'passenger' : 'passengers'}
                                   </p>
                                 </div>
-                                <div className="text-right">
-                                  <p className="font-bold text-secondary-200 text-sm md:text-base">{formatCurrency(c.fixed_fare)}</p>
+                                <div className="flex items-end justify-between sm:block sm:text-right">
+                                  <p className="font-bold text-secondary-200 text-sm md:text-[15px]">{formatCurrency(c.fixed_fare)}</p>
                                   <p className="text-xs text-gray-400">fixed rate</p>
                                 </div>
                               </div>
@@ -995,7 +1112,7 @@ export default function BookTaxi() {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex items-center justify-center gap-2 flex-1 rounded-xl bg-secondary-500 px-4 py-3 md:py-4 text-sm md:text-base font-bold text-primary-950 hover:bg-secondary-400 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-secondary-500 transition-all duration-200 shadow-[0_8px_20px_rgba(255,214,10,0.25)]"
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 flex-1 rounded-xl bg-secondary-500 px-3 sm:px-4 py-3 md:py-4 text-xs sm:text-sm md:text-base font-bold text-primary-950 whitespace-nowrap hover:bg-secondary-400 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-secondary-500 transition-all duration-200 shadow-[0_8px_20px_rgba(255,214,10,0.25)]"
                 >
                   {step === 'confirm' ? (
                     <>

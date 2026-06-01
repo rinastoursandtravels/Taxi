@@ -22,8 +22,6 @@ export async function GET(request: NextRequest) {
         driver_name,
         driver_phone,
         driver_email,
-        driver_license_number,
-        driver_license_expiry,
         driver_verified,
         is_active,
         created_at
@@ -61,8 +59,6 @@ export async function POST(request: NextRequest) {
       driver_name,
       driver_phone,
       driver_email,
-      driver_license_number,
-      driver_license_expiry,
       driver_verified
     } = body
 
@@ -83,8 +79,6 @@ export async function POST(request: NextRequest) {
         driver_name,
         driver_phone,
         driver_email: driver_email || null,
-        driver_license_number: driver_license_number || null,
-        driver_license_expiry: driver_license_expiry || null,
         driver_verified: driver_verified || false,
         is_active: true,
       },
