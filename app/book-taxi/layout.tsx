@@ -1,9 +1,9 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Book Taxi – Airport Cab Booking Itanagar',
+  title: 'Book Taxi - Fixed Fare Airport Cab Booking',
   description:
-    "Book your airport taxi online in seconds from Donyi Polo Airport (Hollongi). Choose your vehicle and time with transparent pricing and no hidden fees.",
+    'Book your fixed-fare airport taxi online from Donyi Polo Airport (Hollongi). Choose destination, car, and pickup slot with transparent pricing and no hidden fees.',
   keywords: [
     'book taxi itanagar',
     'book airport taxi hollongi',
@@ -11,14 +11,15 @@ export const metadata: Metadata = {
     'taxi booking itanagar online',
     'airport cab booking arunachal',
     'pre-book taxi hollongi airport',
+    'fixed fare airport taxi',
   ],
   alternates: {
     canonical: '/book-taxi',
   },
   openGraph: {
-    title: 'Book Taxi – Airport Cab Booking Itanagar',
+    title: 'Book Taxi - Fixed Fare Airport Cab Booking',
     description:
-      "Book airport taxi from Donyi Polo Airport (Hollongi). Transparent pricing, verified drivers.",
+      'Book fixed-fare airport taxi from Donyi Polo Airport (Hollongi) with verified drivers and transparent pricing.',
     url: '/book-taxi',
   },
 }
