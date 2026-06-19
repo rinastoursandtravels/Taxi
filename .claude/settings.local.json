@@ -20,7 +20,8 @@
       "Read(//c/Users/Yami Main/.claude/projects/d--CODE-BeeDigital-TaxiHollongi/**)",
       "Bash(Get-ChildItem -Path \"d:\\\\CODE\\\\BeeDigital\\\\TaxiHollongi\" -Directory -Force)",
       "Bash(Select-Object Name)",
-      "Bash(python -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(list\\(p.get\\('dependencies',{}\\).keys\\(\\)\\)[:10]\\)\")"
+      "Bash(python -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(list\\(p.get\\('dependencies',{}\\).keys\\(\\)\\)[:10]\\)\")",
+      "Bash(jq --version)"
     ]
   }
 }

@@ -55,6 +55,53 @@ export async function createPaymentInDB(paymentData: {
 }
 
 /**
+ * Atomically record an online payment AND confirm its booking.
+ *
+ * Delegates to the `record_online_payment` Postgres function so the payments
+ * row, the payment_records ledger row and the booking confirmation all commit
+ * together (or not at all). Idempotent: safe to call from verify, the webhook
+ * and reconciliation for the same payment.
+ *
+ * @param bookingUuid    bookings.id (the PK — what Razorpay order notes carry)
+ * @param txnId          Razorpay payment id (pay_...)
+ * @param orderId        Razorpay order id (order_...)
+ * @param capturedAmount amount captured by Razorpay, in rupees
+ * @param invoice        invoice number to stamp on the ledger row
+ */
+export async function recordOnlinePaymentAtomic(args: {
+  bookingUuid: string
+  txnId: string
+  orderId?: string | null
+  capturedAmount: number
+  invoice?: string | null
+}): Promise<{
+  data: { payment_id: string; was_created: boolean; amount_mismatch: boolean } | null
+  error: unknown
+}> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('record_online_payment', {
+      p_booking_uuid: args.bookingUuid,
+      p_txn_id: args.txnId,
+      p_order_id: args.orderId ?? null,
+      p_captured_amount: args.capturedAmount,
+      p_invoice: args.invoice ?? null,
+    })
+
+    if (error) {
+      console.error('record_online_payment RPC error:', error)
+      return { data: null, error }
+    }
+
+    // The function returns a single-row table; supabase surfaces it as an array.
+    const row = Array.isArray(data) ? data[0] : data
+    return { data: row ?? null, error: null }
+  } catch (err) {
+    console.error('Exception in recordOnlinePaymentAtomic:', err)
+    return { data: null, error: err }
+  }
+}
+
+/**
  * Get payment record by booking ID
  * @param bookingId - Booking ID
  * @returns Payment record or null

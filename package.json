@@ -4,8 +4,7 @@
   "description": "Mobile-first taxi and tour booking platform for airport passengers",
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/generate-changelog.js && next build",
-    "changelog": "node scripts/generate-changelog.js",
+    "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "db:push": "supabase db push",

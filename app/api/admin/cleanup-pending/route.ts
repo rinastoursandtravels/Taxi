@@ -2,11 +2,33 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { getAdminFromRequest, requireAdminRequest } from '@/lib/admin-auth'
 import { logSystemEvent } from '@/lib/system-events'
+import { reconcileCapturedPayments } from '@/lib/reconcile'
 
 export const dynamic = 'force-dynamic'
 
 // Core delete logic — shared by cron and manual trigger
 async function deleteExpiredPendingBookings(timeoutDays: number) {
+  // SAFETY GUARD: before deleting anything, heal any captured-but-unrecorded
+  // payments. A paid booking gets flipped to 'confirmed' here and is therefore
+  // excluded from the 'pending' delete query below — so we can never delete a
+  // booking whose customer actually paid. Window must cover the delete age.
+  try {
+    const heal = await reconcileCapturedPayments(Math.max(3, timeoutDays + 1))
+    if (heal.healed > 0) {
+      await logSystemEvent({
+        severity: 'warn',
+        event_type: 'cleanup_skipped_paid_booking',
+        actor_type: 'job',
+        message: `Cleanup healed ${heal.healed} paid booking(s) before deletion instead of deleting them`,
+        metadata: { healed: heal.healed, details: heal.healedDetails },
+      })
+    }
+  } catch (err) {
+    // If reconcile fails we must NOT proceed to delete — bail out safely.
+    console.error('Cleanup pre-reconcile failed; skipping deletion this run:', err)
+    throw err
+  }
+
   const cutoff = new Date(Date.now() - timeoutDays * 24 * 60 * 60 * 1000).toISOString()
 
   const { data: staleBookings, error: fetchError } = await supabaseAdmin

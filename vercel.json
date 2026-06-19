@@ -5,6 +5,10 @@
   "regions": ["iad1"],
   "crons": [
     {
+      "path": "/api/admin/reconcile-payments",
+      "schedule": "0 18 * * *"
+    },
+    {
       "path": "/api/admin/cleanup-pending",
       "schedule": "0 0 * * *"
     }

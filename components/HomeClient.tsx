@@ -445,6 +445,29 @@ export default function HomeClient() {
           () => { moveToSection(0, true); resetAllCards() }, // Instant move to hero section
           () => { transitioning = false }
         )
+      } else if (from.t === 'hero' && to.t === 'steps') {
+        // No-tours path: hero jumps straight to the How-It-Works section.
+        playSvgWipe(true,
+          () => {
+            gsap.set('.step-card', { y: 70, opacity: 0, rotateX: -18, scale: 0.94 })
+            gsap.set('.step-connector', { opacity: 0, scale: 0.5 })
+            gsap.set('.step-ring-arc', { strokeDashoffset: 153.9 })
+            moveToSection(stepsEl?.offsetTop ?? 0, true)
+          },
+          () => {
+            gsap.to('.step-card', { y: 0, opacity: 1, rotateX: 0, scale: 1, transformPerspective: 800, stagger: 0.14, duration: 0.75, ease: 'back.out(1.4)' })
+            gsap.to('.step-connector', { opacity: 1, scale: 1, stagger: 0.14, duration: 0.5, ease: 'back.out(1.7)', delay: 0.3 })
+            gsap.to('.step-ring-arc', { strokeDashoffset: 0, stagger: 0.18, duration: 1.3, ease: 'power3.out', delay: 0.45 })
+            gsap.delayedCall(0.4, () => { transitioning = false })
+          },
+          hideHeader
+        )
+      } else if (from.t === 'steps' && to.t === 'hero') {
+        // No-tours path: How-It-Works wipes back to hero in one step.
+        playSvgWipe(false,
+          () => { moveToSection(0, true) },
+          () => { transitioning = false }
+        )
       } else if (from.t === 'tours' && to.t === 'tours') {
         const fromGi = (from as { t: 'tours'; gi: number }).gi
         const toGi   = (to   as { t: 'tours'; gi: number }).gi
@@ -1795,6 +1818,9 @@ export default function HomeClient() {
       </div>{/* end h-screen hero+stats wrapper */}
 
       {/* ════════════════════ TOURS ════════════════════ */}
+      {/* Skip the whole section when there are no tours — otherwise it occupies a full viewport
+          for a placeholder and the scroll-step machine has nothing to land on. */}
+      {(loadingTours || featuredTours.length > 0) && (
       <section
         className="tours-section h-[100dvh] py-8 md:py-28 relative overflow-hidden flex flex-col justify-center"
         style={{ background: 'linear-gradient(160deg, #16120f 0%, #1c1410 35%, #110e0c 70%, #0d0b09 100%)' }}
@@ -2027,6 +2053,7 @@ export default function HomeClient() {
           )}
         </div>
       </section>
+      )}
 
       {/* ════════════════════ HOW IT WORKS ════════════════════ */}
       <section className="steps-section h-[100dvh] bg-primary-950 relative overflow-hidden flex flex-col">

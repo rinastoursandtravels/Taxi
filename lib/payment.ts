@@ -35,6 +35,56 @@ export function verifyRazorpayPayment(
   return expectedSignature === signature
 }
 
+/**
+ * Verify an inbound Razorpay webhook signature.
+ * Razorpay signs the *raw* request body with the webhook secret (HMAC-SHA256).
+ */
+export function verifyWebhookSignature(rawBody: string, signature: string): boolean {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET || ''
+  if (!secret || !signature) return false
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
+  // timing-safe compare; lengths must match first
+  const a = Buffer.from(expected)
+  const b = Buffer.from(signature)
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+/**
+ * List payments for a time window (used by reconciliation).
+ * @param from - unix seconds (inclusive)
+ * @param to   - unix seconds (inclusive)
+ */
+export async function listRazorpayPayments(params: {
+  from: number
+  to: number
+  count?: number
+  skip?: number
+}) {
+  try {
+    return await getRazorpay().payments.all({
+      from: params.from,
+      to: params.to,
+      count: params.count ?? 100,
+      skip: params.skip ?? 0,
+    })
+  } catch (error) {
+    console.error('Razorpay Payments List Error:', error)
+    throw error
+  }
+}
+
+/**
+ * Fetch an order (used to read notes.booking_id when reconciling).
+ */
+export async function getOrderDetails(orderId: string) {
+  try {
+    return await getRazorpay().orders.fetch(orderId)
+  } catch (error) {
+    console.error('Razorpay Order Fetch Error:', error)
+    throw error
+  }
+}
+
 export async function getPaymentDetails(paymentId: string) {
   try {
     const payment = await getRazorpay().payments.fetch(paymentId)
