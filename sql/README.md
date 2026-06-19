@@ -18,6 +18,7 @@ Supabase (PostgreSQL). Run each file in Supabase SQL Editor in the order below.
 | 10 | `system_events_schema.sql` | `system_events` | Sanitized operational log events. |
 | 11 | `seed_system_logs_setting.sql` | - | Seeds `app_settings.system_logs_max_rows` if missing. |
 | 12 | `cleanup_demo_payment_data.sql` | - | Optional cleanup for demo payment rows. |
+| 13 | `payment_integrity.sql` | - | **Required.** Idempotent. Adds the `record_online_payment()` RPC (atomic record-payment + confirm-booking) and a partial unique index on `payment_records.txn_id`. Run after #5. Re-runnable (`CREATE OR REPLACE` / `IF NOT EXISTS`). |
 
 ## Booking Types
 

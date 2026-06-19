@@ -102,7 +102,10 @@ BEGIN
     v_payment_id, v_booking_id::text, 'online', p_txn_id, 'razorpay',
     v_online_paid, 'INR', 'success', p_order_id, p_invoice
   )
-  ON CONFLICT (txn_id) DO NOTHING;
+  -- NOTE: the unique index on txn_id is PARTIAL (WHERE txn_id IS NOT NULL),
+  -- so the ON CONFLICT arbiter MUST repeat that predicate or Postgres raises
+  -- 42P10 "no unique or exclusion constraint matching the ON CONFLICT spec".
+  ON CONFLICT (txn_id) WHERE txn_id IS NOT NULL DO NOTHING;
 
   -- Confirm the booking — but never resurrect a cancelled one.
   UPDATE bookings

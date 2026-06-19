@@ -282,10 +282,13 @@ flowchart TD
 | FR-PAY-2 | The system shall compute the advance as `round(total × 0.30 × 100) / 100` and the cash portion as `total − advance`. |
 | FR-PAY-3 | The system shall create a Razorpay order server-side (`POST /api/payment/create-order`) with amount in paise. |
 | FR-PAY-4 | The system shall verify the Razorpay signature (`HMAC-SHA256(order_id + "|" + payment_id, RAZORPAY_KEY_SECRET)`) server-side (`POST /api/payment/verify`) before confirming the booking. |
-| FR-PAY-5 | On verification success, the system shall: set `payments.txn_status = 'success'`; set `payments.payment_status` to `partial` or `paid`; set `bookings.booking_status = 'confirmed'`; write a `payment_records` row with an `invoice_number`; send a confirmation email. |
-| FR-PAY-6 | The system shall let an admin mark the cash portion collected (`POST /api/payment/confirm-cash`), recording `cash_paid_at` and `cash_collected_by`. |
-| FR-PAY-7 | The system shall track `payment_status ∈ {pending, partial, paid}` and `refund_status ∈ {none, pending, processed, failed}`. |
-| FR-PAY-8 | The system shall expose a downloadable PDF invoice generated client-side. |
+| FR-PAY-5 | On verification success, the system shall record the payment and confirm the booking **atomically** via `record_online_payment()`: write `payments` (`txn_status='success'`, `payment_status` `partial`/`paid`), write a `payment_records` row with an `invoice_number`, set `bookings.booking_status='confirmed'` — all in one transaction — then send a confirmation email. |
+| FR-PAY-6 | The system shall be **fail-closed**: if the atomic write fails, the booking must NOT be confirmed; `verify` returns `202 {pending:true}` and the failure is logged (`payment_record_failed`). |
+| FR-PAY-7 | The system shall accept a signed Razorpay **webhook** (`POST /api/payment/webhook`, `payment.captured`/`order.paid`, verified with `RAZORPAY_WEBHOOK_SECRET`) that records captures server-to-server even if the client never returns. |
+| FR-PAY-8 | The system shall **reconcile** captured Razorpay payments against the DB (daily cron + admin trigger), auto-healing any unrecorded payment idempotently, and shall not delete a `pending` booking that has a captured payment. |
+| FR-PAY-9 | The system shall let an admin mark the cash portion collected (`POST /api/payment/confirm-cash`), recording `cash_paid_at` and `cash_collected_by`. |
+| FR-PAY-10 | The system shall track `payment_status ∈ {pending, partial, paid}` and `refund_status ∈ {none, pending, processed, failed}`. |
+| FR-PAY-11 | The system shall expose a downloadable PDF invoice generated client-side. |
 
 #### Admin (FR-ADM)
 
@@ -1459,10 +1462,15 @@ flowchart TB
 - **Modes:** `partial` (30% online + 70% cash) and `full` (100% online).
 - **Math:** advance `= round(total × 0.30 × 100)/100`; cash `= total − advance` (see `lib/payment-utils.ts`).
 - **Gateway:** Razorpay hosted checkout; merchant name shown as **"Rina's Tours and Travels"**; amount in paise.
-- **Server flow:** `POST /api/payment/create-order` → Razorpay order + `payments` row (`txn_status='pending'`); `POST /api/payment/verify` → HMAC check → `payments` (`success` + `payment_status`), `bookings` (`confirmed`), `payment_records` (+`invoice_number`), confirmation email.
+- **Server flow:** `POST /api/payment/create-order` → Razorpay order (`notes.booking_id` = `bookings.id`); `POST /api/payment/verify` → HMAC check → confirm capture with Razorpay → `record_online_payment()` RPC writes `payments` + `payment_records` (+`invoice_number`) and sets `bookings.booking_status='confirmed'` **atomically** → confirmation email.
+- **Atomic, idempotent write path:** `verify`, the webhook, and reconcile all call the single Postgres function `record_online_payment()` (`sql/payment_integrity.sql`). Payment row + ledger row + booking confirmation commit together or not at all; safe to call repeatedly (`ON CONFLICT (booking_id)` + partial unique index on `payment_records.txn_id`).
+- **Fail-closed:** if the atomic write fails, `verify` does **not** confirm the booking and returns `202 {pending:true}` — the customer sees "finalizing", money is safe, and the webhook/reconcile heal it.
+- **Webhook safety net:** `POST /api/payment/webhook` (`payment.captured` / `order.paid`, signed with `RAZORPAY_WEBHOOK_SECRET`) records captures even if the browser closes before `verify` — resolves in seconds.
+- **Reconcile (self-heal):** daily Vercel cron `GET /api/admin/reconcile-payments` (+ admin "Reconcile Now" `POST`) pulls Razorpay captures and backfills any unrecorded payment (≤ ~24h without a webhook). `cleanup-pending` runs reconcile *before* deleting, so a paid `pending` booking is never deleted.
 - **Cash reconciliation:** admin → `POST /api/payment/confirm-cash` → sets `amount_cash_paid`, `cash_paid_at`, `cash_collected_by`.
 - **Statuses:** `payments.payment_status ∈ {pending, partial, paid}`; `txn_status ∈ {pending, success, failed}`; `refund_status ∈ {none, pending, processed, failed}` (refunds are processed manually by an admin).
-- **Helper library:** `lib/payment-db.ts` — `calculatePaymentAmounts`, `createPaymentInDB`, `getPaymentByBookingId`, `updatePaymentStatus`, `createPaymentRecord`, `getPaymentRecordsByPaymentId`, `markCashPaymentCollected`.
+- **Audit log (`system_events`):** `online_payment_confirmed`, `payment_record_failed`, `payment_signature_invalid`, `webhook_payment_recorded`, `webhook_signature_invalid`, `payment_reconciled_healed`, `payment_amount_mismatch`.
+- **Helper library:** `lib/payment-db.ts` — `recordOnlinePaymentAtomic` (the write path), `getPaymentByBookingId`, `createPaymentRecord`, `getPaymentRecordsByPaymentId`, `markCashPaymentCollected`; `lib/payment-utils.ts` — `calculatePaymentAmounts`; `lib/reconcile.ts` — `reconcileCapturedPayments`. (`createPaymentInDB`/`updatePaymentStatus` are superseded by the atomic RPC.)
 - **Test mode:** Razorpay test card `4111 1111 1111 1111` (any future expiry, any CVV); UPI `success@razorpay` / `failure@razorpay`.
 
 ### 11.4 Invoice System
@@ -1612,11 +1620,14 @@ SELECT email, full_name, last_login, is_active FROM public.admins ORDER BY last_
 | Method & Path | Auth | Body / Query | Returns |
 |---------------|------|--------------|---------|
 | `POST /api/payment/create-order` | session | `{ amount, bookingId, currency:'INR' }` | `{ orderId }` (amount echoed in paise) |
-| `POST /api/payment/create-payment` | session | `{ bookingId, amount, currency, paymentType }` | `{ success, orderId, amount, currency }` |
-| `POST /api/payment/verify` | session | `{ orderId, paymentId, signature, bookingId, amount, paymentType, userEmail, userName, ... }` | `{ success, bookingId, invoiceNumber }` · 400 invalid signature |
+| `POST /api/payment/verify` | session | `{ orderId, paymentId, signature, bookingId, ... }` | `{ success, bookingId, invoiceNumber }` · `202 {pending:true}` if capture unconfirmable · 400 invalid signature |
+| `POST /api/payment/webhook` | `x-razorpay-signature` | Razorpay event (`payment.captured` / `order.paid`) | `200 {received}` · 400 invalid signature. Records via the atomic RPC (idempotent). |
+| `POST /api/payment/create-payment` | session | `{ bookingId, amountOnlinePaid, txnId, orderId? }` | `{ success, paymentId, invoiceNumber }` — manual/admin record (delegates to the atomic RPC) |
 | `POST /api/payment/confirm-cash` | Bearer | `{ booking_id, collected_by, amount_collected }` | `{ success }` |
 | `GET /api/payment/get-payment` | session/Bearer | `?booking_id=` | `{ payment:{...} }` |
 | `GET /api/payment/get-all` | Bearer | `?limit=&offset=` | `{ payments:[...] }` |
+| `GET /api/admin/reconcile-payments` | Bearer `CRON_SECRET` | — (Vercel cron) | `{ success, scanned, healed, ... }` |
+| `POST /api/admin/reconcile-payments` | Bearer admin JWT | `?days=N` | `{ success, scanned, healed, confirmedWithoutPayment, ... }` — admin "Reconcile Now" |
 
 ### 13.5 Cars / Vehicles
 

@@ -111,17 +111,29 @@ colors: {
 ## API Endpoints
 
 ```
-POST /api/payment/create-payment   — Create Razorpay order
+POST /api/payment/create-order     — Create a Razorpay order
   Body: { amount, bookingId, currency }
-  Response: { success, orderId, amount, currency }
+  Response: { orderId, amount, currency }
 
-POST /api/payment/verify           — Verify payment signature
-  Body: { orderId, paymentId, signature, bookingId, amount, ... }
-  Response: { success, message, bookingId, invoiceNumber }
+POST /api/payment/verify           — Verify signature → atomically record payment + confirm booking (fail-closed)
+  Body: { orderId, paymentId, signature, bookingId, ... }
+  Response: { success, bookingId, invoiceNumber }
+  202    { pending:true } if Razorpay capture can't be confirmed yet (webhook/reconcile will heal)
 
+POST /api/payment/webhook          — Razorpay webhook (payment.captured / order.paid): server-to-server safety net
+  Header: x-razorpay-signature     — verified with RAZORPAY_WEBHOOK_SECRET; calls the same atomic RPC (idempotent)
+
+POST /api/payment/create-payment   — Manual/admin payment record (delegates to the same atomic RPC)
 POST /api/payment/confirm-cash     — Confirm cash payment (admin)
-POST /api/payment/get-payment      — Get payment details
+GET  /api/payment/get-payment      — Get payment details for a booking
+
+GET  /api/admin/reconcile-payments — Cron: pull Razorpay captures, heal any unrecorded payment (Bearer CRON_SECRET)
+POST /api/admin/reconcile-payments — Admin "Reconcile Now" button (Bearer admin JWT); ?days=N window
 ```
+
+All three record paths (`verify`, `webhook`, `reconcile`) funnel through the single idempotent Postgres
+function `record_online_payment()` (see `sql/payment_integrity.sql`), so a payment is recorded **and** the
+booking confirmed together (atomic) and never duplicated.
 
 ---
 
@@ -134,6 +146,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...         # NEVER expose in frontend
 NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_...
 RAZORPAY_KEY_SECRET=...                  # NEVER expose in frontend
+RAZORPAY_WEBHOOK_SECRET=...              # Webhook signing secret — must match the value set in Razorpay dashboard
+JWT_SECRET=...                           # Admin auth token signing
+CRON_SECRET=...                          # Authenticates Vercel cron calls (cleanup + reconcile)
 
 # Optional
 RESEND_API_KEY=re_...
@@ -251,7 +266,7 @@ SSL (self-hosted): `sudo certbot certonly --nginx -d yourdomain.com`
 ### Infrastructure
 - Error tracking (Sentry/Rollbar)
 - Uptime monitoring
-- Audit logging
+- ~~Audit logging~~ — done (`system_events` + payment-event logging)
 - Penetration testing / security audit
 
 ---
@@ -268,9 +283,10 @@ SSL (self-hosted): `sudo certbot certonly --nginx -d yourdomain.com`
 | `drivers` | Driver records |
 | `bookings` | Core booking records |
 | `assignments` | Driver/vehicle → booking mapping |
-| `payments` | Transaction records |
-| `invoices` | Generated invoice records |
-| `notifications` | Notification tracking |
+| `payments` | One payment summary per booking (`booking_id` UNIQUE) |
+| `payment_records` | Per-transaction ledger (online/cash) under a payment |
+| `system_events` | Sanitized operational/audit log (admin Logs panel) |
+| `app_settings` | Feature/runtime flags (e.g. reconcile window, cleanup) |
 
 Check indexes: `SELECT * FROM pg_indexes WHERE tablename='bookings';`
 
@@ -386,4 +402,16 @@ Two payment types — Partial (30% online + 70% cash at airport) and Full (100% 
 
 Cash collection: admin confirms via `POST /api/payment/confirm-cash` → updates `amount_cash_paid` and `cash_paid_at`.
 
-Helper library: `lib/payment-db.ts` — `calculatePaymentAmounts()`, `createPaymentInDB()`, `getPaymentByBookingId()`, `markCashPaymentCollected()`
+Helper library: `lib/payment-db.ts` — `recordOnlinePaymentAtomic()` (the one write path), `getPaymentByBookingId()`, `createPaymentRecord()`, `getPaymentRecordsByPaymentId()`, `markCashPaymentCollected()`. Amount math lives in `lib/payment-utils.ts` (`calculatePaymentAmounts`). Reconcile logic: `lib/reconcile.ts`.
+
+### Payment integrity & reliability
+
+Designed so a captured payment can **never** be lost and a booking can **never** be confirmed without its payment row:
+
+- **Atomic write path** — `verify`, `webhook`, and `reconcile` all call one idempotent Postgres function, `record_online_payment()` (`sql/payment_integrity.sql`). It records the `payments` row, the `payment_records` ledger row, and flips `bookings.booking_status='confirmed'` in a single transaction. Idempotent via `ON CONFLICT (booking_id)` and a partial unique index on `payment_records.txn_id`.
+- **Fail-closed `verify`** — confirms the capture with Razorpay first; if the atomic write fails it does **not** confirm the booking and returns `202 {pending:true}` (money is safe; webhook/reconcile heal it). The customer is shown "finalizing", never "failed".
+- **Webhook safety net** — `POST /api/payment/webhook` (`payment.captured` / `order.paid`) records the payment even if the customer's browser closes before `verify` runs. Resolves in seconds.
+- **Reconcile (self-heal)** — daily Vercel cron + admin "Reconcile Now" button pull Razorpay captures and backfill any unrecorded payment (≤ ~24h worst case without a webhook). Logs `payment_reconciled_healed`.
+- **Cleanup guard** — `cleanup-pending` runs reconcile *before* deleting stale `pending` bookings, so a paid-but-pending booking is healed → confirmed → never deleted.
+- **Audit trail** — every outcome is logged to `system_events` (admin Logs): `online_payment_confirmed`, `payment_record_failed`, `payment_signature_invalid`, `webhook_payment_recorded`, `webhook_signature_invalid`, `payment_reconciled_healed`, `payment_amount_mismatch`.
+- **Setup:** run `sql/payment_integrity.sql`; set `RAZORPAY_WEBHOOK_SECRET` (matching the Razorpay dashboard webhook) and `CRON_SECRET`. Webhook URL: `https://<domain>/api/payment/webhook`, events `payment.captured` + `order.paid`.

@@ -232,15 +232,19 @@ RESEND_API_KEY=re_demo_key_for_testing_only
 ### Razorpay Implementation
 - **Test Mode**: Enabled by default
 - **Payment Methods**: Card, UPI, NetBanking, Wallets
-- **Webhook Verification**: Signature verification implemented
+- **Checkout signature**: HMAC verification on `/api/payment/verify`
+- **Webhook**: `/api/payment/webhook` (`payment.captured` / `order.paid`), signed with `RAZORPAY_WEBHOOK_SECRET`
 - **Test Card**: `4111 1111 1111 1111` (Visa, any expiry)
 
 ### Payment Flow
 1. User selects payment method (30% advance or 100%)
 2. Order created via `/api/payment/create-order`
 3. Razorpay modal opens
-4. Payment completion triggers `/api/payment/verify`
-5. Booking confirmed on successful verification
+4. Payment completion triggers `/api/payment/verify` → **atomically** records the payment and confirms the booking
+5. **Webhook** (`/api/payment/webhook`) independently records the capture — so the booking is confirmed even if the customer's browser closes mid-flow
+6. **Reconcile** (daily cron + admin "Reconcile Now") pulls Razorpay captures and heals any payment that slipped through — nothing is ever lost
+
+> Reliability: all three paths use one idempotent DB function (`record_online_payment`), so a payment is never duplicated and a booking is never confirmed without its payment row. See `sql/payment_integrity.sql` and `DEVREF.md → Payment integrity & reliability`.
 
 ## 📧 Email Notifications
 
@@ -386,8 +390,12 @@ The application runs in demo mode with:
 ## 📝 API Endpoints
 
 ### Payment APIs
-- `POST /api/payment/create-order` - Create Razorpay order
-- `POST /api/payment/verify` - Verify payment signature
+- `POST /api/payment/create-order` - Create a Razorpay order
+- `POST /api/payment/verify` - Verify signature → atomically record payment + confirm booking (fail-closed)
+- `POST /api/payment/webhook` - Razorpay webhook safety net (`payment.captured` / `order.paid`)
+- `POST /api/payment/confirm-cash` - Admin confirms cash collected
+- `GET /api/payment/get-payment` - Payment details for a booking
+- `GET·POST /api/admin/reconcile-payments` - Heal captured-but-unrecorded payments (cron / admin button)
 
 ### Database Operations
 All database operations use Supabase client library. See `lib/database.ts` for available functions.

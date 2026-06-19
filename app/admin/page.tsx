@@ -497,6 +497,7 @@ export default function AdminDashboard() {
   const [pendingTimeoutDays, setPendingTimeoutDays] = useState<number>(1)
   const [savingPendingTimeout, setSavingPendingTimeout] = useState(false)
   const [cleaningUp, setCleaningUp] = useState(false)
+  const [reconciling, setReconciling] = useState(false)
   const [autoCleanupEnabled, setAutoCleanupEnabled] = useState(true)
   const [togglingAutoCleanup, setTogglingAutoCleanup] = useState(false)
 
@@ -658,6 +659,33 @@ export default function AdminDashboard() {
       toast.error('Cleanup failed.')
     } finally {
       setCleaningUp(false)
+    }
+  }
+
+  const handleReconcilePayments = async () => {
+    setReconciling(true)
+    try {
+      const res = await fetch('/api/admin/reconcile-payments?days=7', { method: 'POST', headers: adminHeaders() })
+      const data = await res.json()
+      if (data.success) {
+        const healed = data.healed || 0
+        if (healed > 0) {
+          toast.success(`Reconciled — recorded ${healed} missing payment${healed !== 1 ? 's' : ''}.`)
+          loadBookings()
+          loadPayments()
+        } else {
+          toast.success('All payments are in sync — nothing to heal.')
+        }
+        if (data.confirmedWithoutPayment > 0) {
+          toast(`⚠️ ${data.confirmedWithoutPayment} confirmed booking(s) still have no payment — check Logs.`, { icon: '⚠️' })
+        }
+      } else {
+        toast.error('Reconciliation failed.')
+      }
+    } catch {
+      toast.error('Reconciliation failed.')
+    } finally {
+      setReconciling(false)
     }
   }
 
@@ -5623,6 +5651,28 @@ export default function AdminDashboard() {
             Example: set 3 days → pending bookings older than 3 days are deleted the next time the daily scheduler runs. &ldquo;Clean Up Now&rdquo; always runs immediately, ignoring the schedule.
           </p>
         </div>
+      </div>
+
+      {/* Payment Reconciliation */}
+      <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
+        <h2 className="text-lg md:text-xl font-bold mb-1">Payment Reconciliation</h2>
+        <p className="text-xs md:text-sm text-gray-500 mb-4">
+          Cross-checks Razorpay against the database and records any captured payment that is missing — e.g. if a customer&apos;s
+          browser closed before the booking finished confirming. Safe to run anytime; it only fills gaps and never duplicates.
+        </p>
+        <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-green-100 bg-green-50 text-xs text-green-700">
+          <span>Scans the last 7 days of payments and heals any missing records instantly.</span>
+          <button
+            onClick={handleReconcilePayments}
+            disabled={reconciling}
+            className="px-3 py-1.5 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors whitespace-nowrap text-xs"
+          >
+            {reconciling ? 'Reconciling…' : '🔄 Reconcile Now'}
+          </button>
+        </div>
+        <p className="text-[11px] text-gray-400 italic mt-2">
+          Runs automatically every day. Use this to heal a payment immediately without waiting for the scheduler.
+        </p>
       </div>
 
       {/* Profile Management */}
