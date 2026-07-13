@@ -1117,6 +1117,7 @@ export default function AdminDashboard() {
 
       const response = await fetch('/api/tours/upload-image', {
         method: 'POST',
+        headers: adminHeaders(),
         body: formData,
       })
 
@@ -1151,7 +1152,7 @@ export default function AdminDashboard() {
 
       const response = await fetch('/api/tours', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: adminHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ ...tourData, highlights }),
       })
 
@@ -1200,7 +1201,7 @@ export default function AdminDashboard() {
 
       const response = await fetch(`/api/tours/${editingTour.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: adminHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ ...tourData, highlights }),
       })
 
@@ -1238,6 +1239,7 @@ export default function AdminDashboard() {
     try {
       const response = await fetch(`/api/tours/${tourId}`, {
         method: 'DELETE',
+        headers: adminHeaders(),
       })
 
       const result = await response.json()
@@ -1299,7 +1301,7 @@ export default function AdminDashboard() {
   const handleDeleteTourImage = async (urlToDelete: string, index: number) => {
     const match = urlToDelete.match(/\/tour_images\/([^?#]+)/)
     if (match) {
-      await fetch(`/api/tours/upload-image?filename=${encodeURIComponent(match[1])}`, { method: 'DELETE' })
+      await fetch(`/api/tours/upload-image?filename=${encodeURIComponent(match[1])}`, { method: 'DELETE', headers: adminHeaders() })
     }
     setTourData(prev => ({ ...prev, image_urls: prev.image_urls.filter((_, i) => i !== index) }))
   }
@@ -1316,7 +1318,7 @@ export default function AdminDashboard() {
     try {
       const response = await fetch('/api/destinations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: adminHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           name: destinationData.name,
           estimated_duration_minutes: durationMins,
@@ -1354,7 +1356,7 @@ export default function AdminDashboard() {
     try {
       const response = await fetch(`/api/destinations/${editingDestination.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: adminHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           name: destinationData.name,
           estimated_duration_minutes: durationMins,
@@ -1384,6 +1386,7 @@ export default function AdminDashboard() {
     try {
       const response = await fetch(`/api/destinations/${destinationId}`, {
         method: 'DELETE',
+        headers: adminHeaders(),
       })
 
       const result = await response.json()
@@ -6990,28 +6993,28 @@ export default function AdminDashboard() {
 
                 {/* Selected Car Summary */}
                 {selectedCarForAssignment && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h3 className="font-semibold mb-3">Selected Vehicle</h3>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h3 className="font-semibold mb-3 text-gray-900">Selected Vehicle</h3>
                     <dl className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <dt className="text-gray-600">Model:</dt>
-                        <dd className="font-medium">{selectedCarForAssignment.model_name}</dd>
+                        <dd className="font-medium text-gray-900">{selectedCarForAssignment.model_name}</dd>
                       </div>
                       <div className="flex justify-between">
                         <dt className="text-gray-600">Registration:</dt>
-                        <dd className="font-medium">{selectedCarForAssignment.number_plate}</dd>
+                        <dd className="font-medium text-gray-900">{selectedCarForAssignment.number_plate}</dd>
                       </div>
                       <div className="flex justify-between">
                         <dt className="text-gray-600">Driver:</dt>
-                        <dd className="font-medium">{selectedCarForAssignment.driver_name}</dd>
+                        <dd className="font-medium text-gray-900">{selectedCarForAssignment.driver_name}</dd>
                       </div>
                       <div className="flex justify-between">
                         <dt className="text-gray-600">Driver Phone:</dt>
-                        <dd className="font-medium">{selectedCarForAssignment.driver_phone}</dd>
+                        <dd className="font-medium text-gray-900">{selectedCarForAssignment.driver_phone}</dd>
                       </div>
                       <div className="flex justify-between">
                         <dt className="text-gray-600">Capacity:</dt>
-                        <dd className="font-medium">{selectedCarForAssignment.capacity} passengers</dd>
+                        <dd className="font-medium text-gray-900">{selectedCarForAssignment.capacity} passengers</dd>
                       </div>
                     </dl>
                   </div>

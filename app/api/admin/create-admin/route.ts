@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production'
+import { getJwtSecret } from '@/lib/admin-auth'
 
 function verifyToken(token: string): any {
   try {
-    return jwt.verify(token, JWT_SECRET)
+    return jwt.verify(token, getJwtSecret())
   } catch (error) {
     return null
   }

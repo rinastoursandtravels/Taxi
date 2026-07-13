@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       if (resolvedBookingId) {
         const { data: booking } = await supabaseAdmin
           .from('bookings')
-          .select('id, booking_id, booking_type, user_name, user_email, phone, passenger_count, start_datetime, pickup_date, pickup_time, destination_id, tour_package_id, car_model')
+          .select('id, booking_id, booking_type, user_name, user_email, phone, passenger_count, start_datetime, destination_id, tour_package_id, car_model')
           .eq('booking_id', resolvedBookingId)
           .single()
 

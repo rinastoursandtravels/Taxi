@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { calculateRatingStats } from '@/lib/reviews'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 
 export async function GET(request: NextRequest) {
   try {
@@ -49,11 +51,28 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // Require a logged-in user. The reviewer's identity comes from the verified
+    // session — not the request body — so nobody can post anonymously or under
+    // someone else's email. (The review form is only shown to signed-in users.)
+    const supabaseAuth = createRouteHandlerClient({ cookies })
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAuth.auth.getUser()
+
+    if (authError || !user?.email) {
+      return NextResponse.json({ success: false, error: 'You must be signed in to leave a review' }, { status: 401 })
+    }
+
     const body = await request.json()
-    const { reviewableType, reviewableId, userEmail, userName, rating, title, comment, userId } = body
+    const { reviewableType, reviewableId, userName, rating, title, comment } = body
+
+    // Identity is taken from the session, never the client payload.
+    const userEmail = user.email
+    const userId = user.id
 
     // Validate inputs
-    if (!reviewableType || !reviewableId || !userEmail || !userName || !rating) {
+    if (!reviewableType || !reviewableId || !userName || !rating) {
       return NextResponse.json(
         { success: false, error: 'Missing required fields' },
         { status: 400 }

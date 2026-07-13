@@ -3,8 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase-admin'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { logSystemEvent } from '@/lib/system-events'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production'
+import { getJwtSecret } from '@/lib/admin-auth'
 
 export async function POST(request: NextRequest) {
   try {
@@ -71,7 +70,7 @@ export async function POST(request: NextRequest) {
         full_name: admin.full_name,
         role: admin.role,
       },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '24h' }
     )
 

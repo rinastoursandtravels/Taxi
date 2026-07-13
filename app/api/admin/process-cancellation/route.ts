@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { refundPayment } from '@/lib/payment'
 import { requireAdminRequest } from '@/lib/admin-auth'
+import { isUuid } from '@/lib/validation'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,10 @@ export async function POST(request: NextRequest) {
 
     if (!booking_id || !action || !['approve', 'reject'].includes(action)) {
       return NextResponse.json({ success: false, error: 'Invalid request parameters' }, { status: 400 })
+    }
+
+    if (!isUuid(booking_id)) {
+      return NextResponse.json({ success: false, error: 'Booking not found' }, { status: 404 })
     }
 
     const { data: booking, error: bookingError } = await supabaseAdmin

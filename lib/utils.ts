@@ -78,8 +78,28 @@ export const calculateTotalPrice = (
 
 // ==================== BOOKING UTILITIES ====================
 export const generateBookingId = (): string => {
-  // Generate a UUID v4 for booking_id since database expects UUID type
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  // Cryptographically-strong UUID v4 (DB column is UUID). Prefer the native
+  // randomUUID; fall back to getRandomValues so it stays secure and works in
+  // both the browser and Node. Math.random() is deliberately NOT used — booking
+  // ids double as unguessable access tokens for guest lookup endpoints.
+  const g: Crypto | undefined =
+    typeof globalThis !== 'undefined' ? (globalThis.crypto as Crypto | undefined) : undefined
+
+  if (g?.randomUUID) {
+    return g.randomUUID()
+  }
+
+  if (g?.getRandomValues) {
+    const bytes = g.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
+  // Extremely old environment with no Web Crypto — should never happen on
+  // Vercel or any modern browser, but keep a last-resort so booking never fails.
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = (Math.random() * 16) | 0
     const v = c === 'x' ? r : (r & 0x3) | 0x8
     return v.toString(16)

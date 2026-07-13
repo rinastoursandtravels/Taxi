@@ -2,11 +2,11 @@
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    // Tour images are stored as arbitrary external URLs in the database,
-    // so we allow all HTTPS hosts while keeping optimization enabled.
+    // Tour images are stored as arbitrary external URLs in the database, so we
+    // allow HTTPS hosts while keeping optimization enabled. Plain HTTP is not
+    // allowed — it would let the image optimizer be used to proxy insecure URLs.
     remotePatterns: [
       { protocol: 'https', hostname: '**' },
-      { protocol: 'http', hostname: '**' },
     ],
   },
   async redirects() {
@@ -27,6 +27,9 @@ const nextConfig = {
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          // Conservative HSTS: protects this host without includeSubDomains/preload,
+          // so it can never break a non-HTTPS subdomain (e.g. a mail host).
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000' },
         ],
       },
     ]

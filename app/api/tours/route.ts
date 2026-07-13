@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { requireAdminRequest } from '@/lib/admin-auth'
 
 function normalizeArrivalTime(value: unknown): string | null {
   if (!value) return null
@@ -31,6 +32,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const unauthorized = requireAdminRequest(request)
+  if (unauthorized) return unauthorized
+
   try {
     const body = await request.json()
     const { name, description, arrival_time, duration_hours, price, max_passengers, car_model, itinerary, highlights, image_url, image_urls } = body

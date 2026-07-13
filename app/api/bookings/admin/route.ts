@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { requireAdminRequest } from '@/lib/admin-auth'
+import { isUuid } from '@/lib/validation'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +38,12 @@ export async function DELETE(request: Request) {
         { success: false, error: 'booking_id is required' },
         { status: 400 }
       )
+    }
+
+    // Guard the interpolated PostgREST filter below: only a UUID is ever a valid
+    // booking identifier, and a UUID cannot carry filter-injection characters.
+    if (!isUuid(booking_id)) {
+      return Response.json({ success: false, error: 'Booking not found' }, { status: 404 })
     }
 
     const { data: booking, error: bookingLookupError } = await supabaseAdmin

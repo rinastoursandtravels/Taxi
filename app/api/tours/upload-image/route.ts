@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { requireAdminRequest } from '@/lib/admin-auth'
 
 export async function POST(request: NextRequest) {
+  const unauthorized = requireAdminRequest(request)
+  if (unauthorized) return unauthorized
+
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File
@@ -75,6 +79,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const unauthorized = requireAdminRequest(request)
+  if (unauthorized) return unauthorized
+
   try {
     const { searchParams } = new URL(request.url)
     const filename = searchParams.get('filename')

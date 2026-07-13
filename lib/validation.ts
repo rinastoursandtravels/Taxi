@@ -3,6 +3,18 @@
  */
 
 /**
+ * Returns true only for a canonical UUID (any version). Used to guard values
+ * that get placed into PostgREST filter strings so a caller can never inject
+ * extra filter syntax (commas, parentheses, other columns) through them.
+ */
+export function isUuid(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  )
+}
+
+/**
  * Validates email format
  */
 export function validateEmail(email: string): { valid: boolean; error?: string } {

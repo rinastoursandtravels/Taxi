@@ -1,24 +1,24 @@
 import { Resend } from 'resend'
 import { NextRequest } from 'next/server'
+import { requireAdminRequest } from '@/lib/admin-auth'
 
+export const dynamic = 'force-dynamic'
+
+// Diagnostic email tester. Admin-only: previously this was public, which let
+// anyone send mail through our Resend account and leaked env values
+// (ADMIN_EMAIL, the Resend key prefix) in the response.
 export async function GET(request: NextRequest) {
+  const unauthorized = requireAdminRequest(request)
+  if (unauthorized) return unauthorized
+
   const to = request.nextUrl.searchParams.get('to')
 
-  const diagnostics: Record<string, any> = {
-    RESEND_API_KEY_set: !!process.env.RESEND_API_KEY,
-    RESEND_API_KEY_prefix: process.env.RESEND_API_KEY?.slice(0, 8) + '...',
-    RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL,
-    ADMIN_EMAIL: process.env.ADMIN_EMAIL,
-    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-    to_param: to,
-  }
-
   if (!process.env.RESEND_API_KEY) {
-    return Response.json({ error: 'RESEND_API_KEY not set', diagnostics }, { status: 500 })
+    return Response.json({ success: false, error: 'RESEND_API_KEY not set' }, { status: 500 })
   }
 
   if (!to) {
-    return Response.json({ error: 'Pass ?to=your@email.com', diagnostics })
+    return Response.json({ success: false, error: 'Pass ?to=your@email.com' }, { status: 400 })
   }
 
   try {
@@ -30,8 +30,8 @@ export async function GET(request: NextRequest) {
       html: '<p>If you see this, Resend is working correctly from Vercel.</p>',
     })
 
-    return Response.json({ success: true, result, diagnostics })
+    return Response.json({ success: true, id: result?.data?.id ?? null })
   } catch (error: any) {
-    return Response.json({ success: false, error: error?.message, details: error, diagnostics }, { status: 500 })
+    return Response.json({ success: false, error: error?.message || 'Send failed' }, { status: 500 })
   }
 }

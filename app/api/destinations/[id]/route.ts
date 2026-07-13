@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { requireAdminRequest } from '@/lib/admin-auth'
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const unauthorized = requireAdminRequest(request)
+  if (unauthorized) return unauthorized
+
   try {
     const { id } = params
 
@@ -20,6 +24,9 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 }
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  const unauthorized = requireAdminRequest(request)
+  if (unauthorized) return unauthorized
+
   try {
     const { id } = params
     const body = await request.json()

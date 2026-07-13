@@ -270,12 +270,27 @@ html, body {
 [data-admin-theme="dark"] .text-green-700 { color: #86efac; }
 [data-admin-theme="dark"] .text-gray-600 { color: #94a3b8; }
 [data-admin-theme="dark"] .text-gray-500 { color: #64748b; }
+/* Accent boxes (blue = selected/info, orange = booked/warning). These mirror
+   the green treatment above so selected cards and info panels stay readable in
+   dark mode instead of rendering light text on an un-inverted light background. */
+[data-admin-theme="dark"] .bg-blue-50   { background-color: #0c1e3d; }
+[data-admin-theme="dark"] .bg-orange-50 { background-color: #2a1505; }
+[data-admin-theme="dark"] .text-blue-800 { color: #93c5fd; }
+[data-admin-theme="dark"] .text-blue-700 { color: #bfdbfe; }
+[data-admin-theme="dark"] .text-blue-600 { color: #93c5fd; }
+[data-admin-theme="dark"] .text-orange-800 { color: #fdba74; }
+[data-admin-theme="dark"] .text-orange-700 { color: #fdba74; }
+[data-admin-theme="dark"] .text-orange-600 { color: #fb923c; }
+[data-admin-theme="dark"] .border-blue-200   { border-color: #1e40af; }
+[data-admin-theme="dark"] .border-blue-100   { border-color: #1e3a8a; }
+[data-admin-theme="dark"] .border-orange-200 { border-color: #9a3412; }
+[data-admin-theme="dark"] .border-orange-100 { border-color: #7c2d12; }
 [data-admin-theme="dark"] .border-gray-200 { border-color: #334155; }
 [data-admin-theme="dark"] .border-gray-300 { border-color: #475569; }
 [data-admin-theme="dark"] .border { border-color: #334155; }
 [data-admin-theme="dark"] .divide-gray-200 > * + * { border-color: #334155; }
-[data-admin-theme="dark"] .card {
 [data-admin-theme="dark"] .border-green-200 { border-color: #14532d; }
+[data-admin-theme="dark"] .card {
   background-color: #1e293b;
   border-color: #334155;
 }

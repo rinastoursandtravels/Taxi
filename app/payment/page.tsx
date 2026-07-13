@@ -57,14 +57,16 @@ function PaymentContent() {
       const orderResponse = await fetch('/api/payment/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: paymentAmount, bookingId: bookingData.dbBookingId, currency: 'INR' }),
+        body: JSON.stringify({ paymentType: method, bookingId: bookingData.dbBookingId, currency: 'INR' }),
       })
       const orderData = await orderResponse.json()
       if (!orderData.orderId) throw new Error('Failed to create payment order')
 
       const options = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-        amount: Math.round(paymentAmount * 100),
+        // Use the amount the server actually created the order for (in paise),
+        // so the checkout can never diverge from the authoritative order amount.
+        amount: orderData.amount,
         currency: 'INR',
         name: "Rina's Tours and Travels",
         description: `${bookingType === 'tour' ? 'Tour Package' : 'Taxi'} Booking`,

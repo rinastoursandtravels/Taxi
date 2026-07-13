@@ -21,7 +21,15 @@
       "Bash(Get-ChildItem -Path \"d:\\\\CODE\\\\BeeDigital\\\\TaxiHollongi\" -Directory -Force)",
       "Bash(Select-Object Name)",
       "Bash(python -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(list\\(p.get\\('dependencies',{}\\).keys\\(\\)\\)[:10]\\)\")",
-      "Bash(jq --version)"
+      "Bash(jq --version)",
+      "Bash(grep -rnE \"\\(rzp_live|rzp_test|sk_live|service_role|eyJ[A-Za-z0-9_-]{20,}\\)\" app lib components scripts)",
+      "Bash(grep -rnE \"supabase\\\\s*$|supabase\\\\.from\\\\\\('[a-z_]+'\\\\\\)|\\\\.from\\\\\\('[a-z_]+'\\\\\\)\" lib/db.ts lib/database.ts lib/reviews.ts)",
+      "Bash(grep -rnE \"fetch\\\\\\(['\\\\\"\\\\`]/api/\\(tours|destinations\\)|/api/tours/upload-image|adminToken|Authorization\" app/admin/page.tsx)",
+      "Bash(grep -nE \"fetch\\\\\\(\\(\\\\`|'\\)/api/\\(tours|destinations\\)\" app/admin/page.tsx)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(grep -nA2 -E \"fetch\\\\\\(\\(\\\\`|'\\)/api/\\(tours|destinations\\)\" app/admin/page.tsx)",
+      "Bash(grep -rnE \"/api/bookings/user\\('|\\\\`|\\\\\"\\)\" app components)",
+      "Bash(grep -rnB2 -A8 \"/api/payment/create-order\" app components)"
     ]
   }
 }

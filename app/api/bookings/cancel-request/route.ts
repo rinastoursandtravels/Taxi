@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { isUuid } from '@/lib/validation'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +13,12 @@ export async function POST(request: NextRequest) {
         { success: false, error: 'booking_id and user_email are required' },
         { status: 400 }
       )
+    }
+
+    // booking_id maps to a UUID column (id or booking_id). Reject anything that
+    // isn't a UUID so it can never inject extra PostgREST filter syntax below.
+    if (!isUuid(booking_id)) {
+      return NextResponse.json({ success: false, error: 'Booking not found' }, { status: 404 })
     }
 
     // Only select columns that always exist — do NOT include new migration columns here

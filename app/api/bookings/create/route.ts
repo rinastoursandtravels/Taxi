@@ -95,14 +95,14 @@ export async function POST(request: NextRequest) {
     // Calculate end_datetime based on booking type
     let endDateTimeStr: string = startDateTimeStr
     let durationMinutes = 0
-    let tourPkg: { duration_hours: number | null; max_passengers: number | null; car_model: string | null } | null = null
+    let tourPkg: { duration_hours: number | null; max_passengers: number | null; car_model: string | null; price: number | null } | null = null
 
     if (bookingData.booking_type === 'tour' && bookingData.tour_package_id) {
       // For tour bookings: fetch authoritative package data from the database.
       try {
         const { data: fetchedTourPkg, error: tourErr } = await supabaseAdmin
           .from('tour_packages')
-          .select('duration_hours, max_passengers, car_model')
+          .select('duration_hours, max_passengers, car_model, price')
           .eq('id', bookingData.tour_package_id)
           .single()
 
@@ -199,12 +199,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (bookingData.booking_type === 'tour') {
-      if (!Number.isFinite(amountTotal) || amountTotal <= 0) {
+      // Never trust the client-supplied amount for tours. Derive it from the
+      // authoritative package price fetched above, mirroring how taxi fares are
+      // resolved from destination_car_fares below.
+      const tourPrice = Number(tourPkg?.price)
+      if (!Number.isFinite(tourPrice) || tourPrice <= 0) {
         return Response.json(
-          { error: 'amount_total must be a positive number' },
-          { status: 400 }
+          { success: false, error: 'This tour is not available for booking (no valid price set)' },
+          { status: 409 }
         )
       }
+      amountTotal = tourPrice
     }
 
     if (bookingData.booking_type === 'taxi' && resolvedCarModel) {
