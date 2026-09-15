@@ -21,6 +21,14 @@ function PaymentContent() {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [bookingData, setBookingData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const [freeLoading, setFreeLoading] = useState(false)
+  // Null until the switch has been read, so the option never flashes in and
+  // then disappears. The server re-checks this on submit regardless.
+  const [freeBookingEnabled, setFreeBookingEnabled] = useState<boolean | null>(null)
+  // Hold window shown in the pre-submit copy, so the customer knows the
+  // deadline before they even choose "pay later". The exact hold_expires_at
+  // instant is only known once confirm-unpaid actually runs.
+  const [freeHoldHours, setFreeHoldHours] = useState<number | null>(null)
 
   useEffect(() => {
     const scroller = scrollRef.current
@@ -49,18 +57,55 @@ function PaymentContent() {
     return () => { document.body.removeChild(script) }
   }, [bookingType])
 
-  const handleRazorpayPayment = async (method: 'partial' | 'full') => {
+  useEffect(() => {
+    let cancelled = false
+    const enabledKey = bookingType === 'tour' ? 'free_booking_enabled_tour' : 'free_booking_enabled_taxi'
+    const holdKey = bookingType === 'tour' ? 'free_booking_hold_hours_tour' : 'free_booking_hold_hours_taxi'
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/admin/settings?key=${enabledKey}`, { cache: 'no-store' })
+        const data = await res.json()
+        const value = data?.settings?.[0]?.value
+        // Absent row means the feature has not been switched off, matching the
+        // server-side default in lib/free-booking.
+        if (!cancelled) setFreeBookingEnabled(value !== 'false')
+      } catch {
+        if (!cancelled) setFreeBookingEnabled(false)
+      }
+      try {
+        const res = await fetch(`/api/admin/settings?key=${holdKey}`, { cache: 'no-store' })
+        const data = await res.json()
+        const value = Number(data?.settings?.[0]?.value)
+        if (!cancelled) setFreeHoldHours(Number.isFinite(value) && value > 0 ? value : null)
+      } catch {
+        if (!cancelled) setFreeHoldHours(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [bookingType])
+
+  // Full payment is the only online option. The 30% advance was removed; its
+  // place in the flow is now taken by the free "Book Now, Pay Later" path.
+  const handleRazorpayPayment = async (method: 'full' = 'full') => {
     if (!bookingData) { toast.error('Booking data not found'); return }
     setLoading(true)
     try {
-      const paymentAmount = method === 'full' ? bookingData.totalPrice : bookingData.advancePayment
+      const paymentAmount = bookingData.totalPrice
       const orderResponse = await fetch('/api/payment/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paymentType: method, bookingId: bookingData.dbBookingId, currency: 'INR' }),
       })
       const orderData = await orderResponse.json()
-      if (!orderData.orderId) throw new Error('Failed to create payment order')
+      // Surface the server's own reason rather than the generic "try again" in
+      // the catch below. A refused order here is usually terminal — the slot was
+      // taken while the booking sat unpaid, the booking was cancelled, or it is
+      // already paid — and retrying will never clear any of those.
+      if (!orderResponse.ok || !orderData.orderId) {
+        toast.error(orderData.error || 'Failed to create payment order. Please try again.')
+        setLoading(false)
+        return
+      }
 
       const options = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
@@ -139,6 +184,36 @@ function PaymentContent() {
     }
   }
 
+  const handleFreeBooking = async () => {
+    if (!bookingData) { toast.error('Booking data not found'); return }
+    setFreeLoading(true)
+    try {
+      const res = await fetch('/api/bookings/confirm-unpaid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: bookingData.dbBookingId }),
+      })
+      const data = await res.json()
+
+      if (!data.success) {
+        toast.error(data.error || 'Could not submit your booking request. Please try again.')
+        setFreeLoading(false)
+        return
+      }
+
+      toast.success('Booking request submitted.')
+      // Carry the hold deadline through so booking-confirmed can show a real
+      // countdown instead of a vague "we'll be in touch" — the customer's own
+      // way to beat it is to pay online before it lapses.
+      const holdParam = data.holdExpiresAt ? `&holdUntil=${encodeURIComponent(data.holdExpiresAt)}` : ''
+      router.replace(`/booking-confirmed?bookingId=${bookingData.dbBookingId}&unpaid=1${holdParam}`)
+    } catch (error) {
+      console.error('Free booking error:', error)
+      toast.error('Could not submit your booking request. Please try again.')
+      setFreeLoading(false)
+    }
+  }
+
   if (!bookingData) {
     return (
       <div ref={scrollRef} className="h-[100dvh] overflow-y-auto overflow-x-hidden bg-primary-950">
@@ -153,8 +228,10 @@ function PaymentContent() {
     )
   }
 
-  const advanceAmount = bookingData.advancePayment
-  const remainingAmount = bookingData.totalPrice - advanceAmount
+  // This booking already chose "pay later" — offering that option again would
+  // be a dead-end loop (it's already held, already unpaid; clicking it again
+  // does nothing new). The only real action left here is paying in full.
+  const alreadyPayLater = bookingData.paymentMode === 'pay_later'
 
   return (
     <div ref={scrollRef} className="scrollbar-thin-modern h-[100dvh] overflow-y-auto overflow-x-hidden bg-primary-950">
@@ -193,6 +270,12 @@ function PaymentContent() {
                 <span className="text-3xl font-black text-secondary-500">₹{bookingData.totalPrice.toFixed(2)}</span>
               </div>
 
+              {alreadyPayLater && (
+                <div className="mb-5 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-300">
+                  This booking is already held as a request. Pay in full below to guarantee your vehicle before the hold runs out.
+                </div>
+              )}
+
               <div className="space-y-2.5 mb-5">
                 <p className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider">Pay in Full</p>
                 <button
@@ -204,25 +287,42 @@ function PaymentContent() {
                 </button>
               </div>
 
-              <div className="flex items-center gap-4 my-5">
-                <div className="flex-1 border-t border-primary-800" />
-                <span className="text-gray-600 text-xs font-medium">or prebook</span>
-                <div className="flex-1 border-t border-primary-800" />
-              </div>
+              {freeBookingEnabled && !alreadyPayLater && (
+                <>
+                  <div className="flex items-center gap-4 my-5">
+                    <div className="flex-1 border-t border-primary-800" />
+                    <span className="text-gray-600 text-xs font-medium">or</span>
+                    <div className="flex-1 border-t border-primary-800" />
+                  </div>
 
-              <div className="bg-primary-950 border border-primary-800 rounded-xl p-4 mb-5">
-                <p className="text-gray-400 text-sm mb-3">
-                  Pay <span className="text-white font-black">₹{advanceAmount.toFixed(2)}</span> (30% advance) now and the remaining{' '}
-                  <span className="text-white font-black">₹{remainingAmount.toFixed(2)}</span> in cash at the airport office on arrival.
-                </p>
-                <button
-                  onClick={() => handleRazorpayPayment('partial')}
-                  disabled={loading}
-                  className="w-full px-5 py-3 border border-primary-700 text-white rounded-xl font-semibold hover:border-secondary-500/50 hover:text-secondary-500 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
-                >
-                  💳 {loading ? 'Processing...' : `Pay ₹${advanceAmount.toFixed(2)} to Prebook`}
-                </button>
-              </div>
+                  <div className="bg-primary-950 border border-primary-800 rounded-xl p-4 mb-5">
+                    <p className="text-gray-400 text-sm mb-3">
+                      Submit this booking without paying now. We hold{' '}
+                      <span className="text-white font-semibold">your selected date and time</span> on this
+                      vehicle — other dates and times stay open to everyone else.{' '}
+                      {freeHoldHours ? (
+                        <>You then have <span className="text-white font-semibold">{freeHoldHours} hours</span> to pay (or until your trip starts, if that comes first)</>
+                      ) : (
+                        <>You then have a limited time to pay</>
+                      )}
+                      {' '}<span className="text-white font-black">₹{bookingData.totalPrice.toFixed(2)}</span> online
+                      to lock it in, or in cash with our team. Miss that deadline and the slot reopens to other customers.
+                    </p>
+                    <button
+                      onClick={handleFreeBooking}
+                      disabled={loading || freeLoading}
+                      className="w-full px-5 py-3 border border-primary-700 text-white rounded-xl font-semibold hover:border-secondary-500/50 hover:text-secondary-500 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
+                    >
+                      📋 {freeLoading ? 'Submitting...' : 'Book Now, Pay Later'}
+                    </button>
+                    <p className="text-gray-600 text-[11px] mt-3 leading-relaxed">
+                      This is a booking <span className="text-gray-500 font-semibold">request</span>, not a
+                      confirmed reservation. If nobody else needs that vehicle for the same slot, our team
+                      can still honour it after the deadline — but paying in time is the only guarantee.
+                    </p>
+                  </div>
+                </>
+              )}
 
               <div className="flex items-center gap-2.5 text-xs text-gray-500">
                 <Shield size={13} className="text-green-500 flex-shrink-0" />
@@ -284,9 +384,11 @@ function PaymentContent() {
                 </div>
               </div>
 
-              <div className="mt-4 bg-secondary-500/10 border border-secondary-500/20 rounded-xl p-3 text-xs text-gray-400">
-                Or prebook for just <span className="text-secondary-500 font-black">₹{advanceAmount.toFixed(2)}</span> — pay rest in cash at the airport.
-              </div>
+              {freeBookingEnabled && !alreadyPayLater && (
+                <div className="mt-4 bg-secondary-500/10 border border-secondary-500/20 rounded-xl p-3 text-xs text-gray-400">
+                  Not ready to pay? Send this as a <span className="text-secondary-500 font-black">booking request</span> and settle in cash with our team.
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -37,19 +37,25 @@ export interface Booking {
   created_at: string
   cancellation_requested_at: string | null
   cancellation_reason: string | null
+  /** 'pay_later' = submitted without payment; see lib/free-booking. */
+  payment_mode?: 'online_full' | 'pay_later'
+  /** TIMESTAMPTZ. When an unpaid booking stops holding its vehicle. */
+  hold_expires_at?: string | null
 }
 
 export interface Payment {
   id: string
   booking_id: string
-  payment_type: 'partial' | 'full'
+  /** 'cash' = a free booking, settled offline. 'partial' is legacy (30%). */
+  payment_type: 'partial' | 'full' | 'cash'
   amount_total: number
   amount_online_paid: number
   amount_cash_paid: number
   txn_status: 'pending' | 'success' | 'failed'
   txn_id: string | null
   gateway: string | null
-  payment_status: 'pending' | 'partial' | 'paid'
+  /** 'unpaid' = free booking awaiting collection. 'partial' is legacy. */
+  payment_status: 'pending' | 'unpaid' | 'partial' | 'paid'
   cash_paid_at: string | null
   cash_collected_by: string | null
   created_at: string

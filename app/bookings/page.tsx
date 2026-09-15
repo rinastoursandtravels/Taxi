@@ -338,7 +338,6 @@ export default function MyBookings() {
       }
 
       const totalPrice = toNum(booking.amount_total)
-      const advancePayment = Math.round(totalPrice * 0.3 * 100) / 100
 
       const startDate = new Date(booking.start_datetime)
       const day = String(startDate.getDate()).padStart(2, '0')
@@ -360,7 +359,10 @@ export default function MyBookings() {
         passengers: booking.passenger_count,
         carType: booking.car_model,
         totalPrice,
-        advancePayment,
+        // Read fresh from the DB via resume, never assumed — this is what lets
+        // /payment tell "already chose pay-later, just needs paying" apart
+        // from "never chose anything yet" and avoid re-offering pay-later.
+        paymentMode: data.booking.payment_mode,
       }
 
       const storageKey = booking.booking_type === 'tour' ? 'tourBookingData' : 'bookingData'
@@ -383,6 +385,28 @@ export default function MyBookings() {
     if (hoursLeft === 0) return { label: `${minsLeft}m left to pay`, urgent: true }
     if (hoursLeft < 3) return { label: `${hoursLeft}h ${minsLeft}m left to pay`, urgent: true }
     return { label: `Expires in ${hoursLeft}h`, urgent: false }
+  }
+
+  // How much longer a free ("pay later") booking keeps its vehicle reserved.
+  //
+  // hold_expires_at is a TIMESTAMPTZ (a real instant) — unlike start_datetime,
+  // it must be parsed with new Date(), never the IST wall-clock helpers used
+  // elsewhere on this page.
+  const getHoldCountdown = (holdExpiresAt: string | null | undefined) => {
+    if (!holdExpiresAt) return null
+    const expiresMs = new Date(holdExpiresAt).getTime()
+    if (Number.isNaN(expiresMs)) return null
+
+    const diff = expiresMs - Date.now()
+    if (diff <= 0) return { label: 'Payment deadline passed', expired: true, urgent: true }
+
+    const totalMinutes = Math.floor(diff / 60000)
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    const urgent = hours < 3
+
+    const label = hours > 0 ? `${hours}h ${minutes}m left to pay` : `${minutes}m left to pay`
+    return { label, expired: false, urgent }
   }
 
   const getStatusBadge = (status: string) => {
@@ -415,6 +439,12 @@ export default function MyBookings() {
     return statusMap[status] || { className: 'bg-gray-500/15 border border-gray-500/30 text-gray-400', label: 'Unknown' }
   }
 
+  // An unpaid booking is cancelled outright rather than queued for review, so
+  // the modal must not promise a refund or a 24-hour turnaround.
+  const isUnpaidCancellation =
+    cancelModalBooking?.booking_status === 'pending' &&
+    cancelModalBooking?.payment_mode === 'pay_later'
+
   const handleCancelRequest = async () => {
     if (!cancelModalBooking || !user?.email) return
     setSubmittingCancellation(true)
@@ -430,7 +460,13 @@ export default function MyBookings() {
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error || 'Failed to submit request')
-      toast.success('Cancellation request submitted. We will review and process your refund shortly.')
+      // An unpaid booking is cancelled outright — there is no payment to refund
+      // and nothing for an admin to review, so promising either would be wrong.
+      toast.success(
+        data.cancelled
+          ? 'Booking cancelled.'
+          : 'Cancellation request submitted. We will review and process your refund shortly.'
+      )
       setCancelModalBooking(null)
       setCancellationReason('')
       await loadBookings(user.email)
@@ -508,9 +544,18 @@ export default function MyBookings() {
         carType: booking.car_model || 'Not specified',
         totalAmount,
         advanceAmount: onlinePaid,
-        remainingAmount: isFullPay ? 0 : Math.max(totalAmount - onlinePaid, 0),
+        // Cash already collected must count toward what has been settled,
+        // otherwise a booking paid entirely in cash prints its full total as
+        // still outstanding.
+        remainingAmount: isFullPay
+          ? 0
+          : Math.max(totalAmount - onlinePaid - toNum(payment.amount_cash_paid), 0),
         paymentStatus: payment.payment_status === 'paid' ? 'completed' : (payment.payment_status || 'pending'),
-        paymentMethod: isFullPay ? 'Full Online Payment' : 'Partial Online + Cash',
+        paymentMethod: isFullPay
+          ? 'Full Online Payment'
+          : onlinePaid > 0
+            ? 'Partial Online + Cash'
+            : 'Cash Payment',
         invoiceNumber,
       }
 
@@ -736,8 +781,40 @@ export default function MyBookings() {
                         </div>
                       </div>
 
-                      {/* Pending payment notice */}
-                      {booking.booking_status === 'pending' && (() => {
+                      {/* Unpaid (pay later) notice — a request, not a reservation.
+                          No email is sent for these, so this is the only place the
+                          customer learns what state their booking is actually in.
+                          Framed as actionable (pay now to lock it in) rather than
+                          passive (wait for a call) — the hold has a real deadline,
+                          and paying online is the customer's own way to beat it. */}
+                      {booking.booking_status === 'pending' && booking.payment_mode === 'pay_later' && (() => {
+                        const hold = getHoldCountdown(booking.hold_expires_at)
+                        return (
+                          <div className={`flex items-start gap-2 rounded-lg px-3 py-2.5 mb-2 text-xs ${hold?.urgent ? 'bg-red-500/10 border border-red-500/20 text-red-300' : 'bg-orange-500/10 border border-orange-500/20 text-orange-300'}`}>
+                            <Clock size={13} className="mt-0.5 shrink-0" />
+                            <span>
+                              {hold && !hold.expired ? (
+                                <>
+                                  Your date and time are held on this vehicle. Pay{' '}
+                                  <span className="font-semibold">₹{toNum(booking.amount_total).toFixed(2)}</span> within{' '}
+                                  <span className="font-semibold">{hold.label}</span> to lock it in — online now, or
+                                  in cash with our team if your trip is sooner than that.
+                                </>
+                              ) : (
+                                <>
+                                  Your payment deadline has passed, so this slot has been reopened to other customers.{' '}
+                                  <span className="font-semibold">Pay now</span> to reclaim it if it is still free, or contact us
+                                  to check availability.
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        )
+                      })()}
+
+                      {/* Pending payment notice — an online checkout that was
+                          started but never completed. These do expire. */}
+                      {booking.booking_status === 'pending' && booking.payment_mode !== 'pay_later' && (() => {
                         const expiry = getPendingExpiryInfo(booking.created_at)
                         return (
                           <div className={`flex items-start gap-2 rounded-lg px-3 py-2.5 mb-2 text-xs ${expiry.urgent ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'}`}>
@@ -762,14 +839,23 @@ export default function MyBookings() {
                           {isExpanded ? 'Hide Details' : 'View Details'}
                           <ChevronDown size={14} className={`transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
                         </button>
+                        {/* A pay-later booking can pay online too — that is how a
+                            customer self-serves a guarantee before the hold
+                            expires, instead of waiting on the team to call. */}
                         {booking.booking_status === 'pending' && (
                           <button
                             onClick={() => handleContinueToPay(booking)}
                             disabled={resumingBookingId === booking.id}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-secondary-500/10 border border-secondary-500/50 text-secondary-500 rounded-lg hover:bg-secondary-500/20 hover:border-secondary-500 transition-colors text-xs font-semibold disabled:opacity-50"
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-xs font-semibold disabled:opacity-50 ${
+                              booking.payment_mode === 'pay_later'
+                                ? 'bg-red-500/10 border border-red-500/50 text-red-300 hover:bg-red-500/20 hover:border-red-500'
+                                : 'bg-secondary-500/10 border border-secondary-500/50 text-secondary-500 hover:bg-secondary-500/20 hover:border-secondary-500'
+                            }`}
                           >
                             <CreditCard size={14} />
-                            {resumingBookingId === booking.id ? 'Loading...' : 'Continue to Pay'}
+                            {resumingBookingId === booking.id
+                              ? 'Loading...'
+                              : booking.payment_mode === 'pay_later' ? 'Pay Now' : 'Continue to Pay'}
                           </button>
                         )}
                         {booking.booking_status === 'confirmed' && (
@@ -782,7 +868,9 @@ export default function MyBookings() {
                             {downloadingInvoiceId === booking.id ? 'Downloading...' : 'Invoice'}
                           </button>
                         )}
-                        {booking.booking_status === 'confirmed' && !booking.cancellation_requested_at && (
+                        {((booking.booking_status === 'confirmed') ||
+                          (booking.booking_status === 'pending' && booking.payment_mode === 'pay_later')) &&
+                          !booking.cancellation_requested_at && (
                           <button
                             onClick={() => setCancelModalBooking(booking)}
                             className="flex items-center gap-2 px-3 py-1.5 border border-red-500/40 text-red-400 rounded-lg hover:border-red-500 hover:bg-red-500/10 transition-colors text-xs"
@@ -825,8 +913,12 @@ export default function MyBookings() {
                 <AlertTriangle size={18} className="text-red-400" />
               </div>
               <div>
-                <h2 className="text-white font-black text-base leading-tight">Request Cancellation</h2>
-                <p className="text-gray-500 text-xs mt-0.5">Review the policy before proceeding</p>
+                <h2 className="text-white font-black text-base leading-tight">
+                  {isUnpaidCancellation ? 'Cancel Booking' : 'Request Cancellation'}
+                </h2>
+                <p className="text-gray-500 text-xs mt-0.5">
+                  {isUnpaidCancellation ? 'This cancels your request immediately' : 'Review the policy before proceeding'}
+                </p>
               </div>
               <button
                 onClick={() => { setCancelModalBooking(null); setCancellationReason('') }}
@@ -843,14 +935,24 @@ export default function MyBookings() {
                 className="rounded-2xl p-4 space-y-2.5"
                 style={{ background: 'rgba(248,113,113,0.07)', border: '1px solid rgba(248,113,113,0.15)' }}
               >
-                <p className="text-red-400 text-xs font-bold uppercase tracking-wider">Refund Policy</p>
+                <p className="text-red-400 text-xs font-bold uppercase tracking-wider">
+                  {isUnpaidCancellation ? 'Before you cancel' : 'Refund Policy'}
+                </p>
                 <ul className="space-y-1.5">
-                  {[
-                    'Your request will be reviewed by our team within 24 hours.',
-                    'Only the online advance payment is eligible for refund.',
-                    'Cash portions are non-refundable through this flow.',
-                    'Refunds take 5–7 business days to reflect in your account.',
-                  ].map((item) => (
+                  {(isUnpaidCancellation
+                    ? [
+                        'You have not paid for this booking, so there is nothing to refund.',
+                        'Your booking will be cancelled straight away.',
+                        'The slot held for you is released immediately.',
+                        'You can submit a new booking request at any time.',
+                      ]
+                    : [
+                        'Your request will be reviewed by our team within 24 hours.',
+                        'Any amount paid online is eligible for refund.',
+                        'Cash already collected is handled separately by our team, not through this flow.',
+                        'Refunds take 5–7 business days to reflect in your account.',
+                      ]
+                  ).map((item) => (
                     <li key={item} className="flex items-start gap-2 text-[13px] text-gray-400 leading-snug">
                       <span className="mt-1 w-1 h-1 rounded-full bg-red-400/60 flex-shrink-0" />
                       {item}
@@ -901,7 +1003,9 @@ export default function MyBookings() {
                     boxShadow: submittingCancellation ? 'none' : '0 4px 20px rgba(220,38,38,0.25)',
                   }}
                 >
-                  {submittingCancellation ? 'Submitting...' : 'Request Cancellation'}
+                  {submittingCancellation
+                    ? (isUnpaidCancellation ? 'Cancelling...' : 'Submitting...')
+                    : (isUnpaidCancellation ? 'Cancel Booking' : 'Request Cancellation')}
                 </button>
               </div>
             </div>

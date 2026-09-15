@@ -268,8 +268,6 @@ export default function BookTaxi() {
 
   const currentStepIndex = AIRPORT_STEPS.indexOf(step)
   const totalCost = selectedCarModel ? Number(selectedCarModel.fixed_fare || 0) : 0
-  const advance = Math.round(totalCost * 0.3 * 100) / 100
-  const remaining = Math.round(totalCost * 0.7 * 100) / 100
 
   const loadCars = async () => {
     if (!selectedDest) return
@@ -355,7 +353,6 @@ export default function BookTaxi() {
         return
       }
       const confirmedTotal = Number(result.booking.amount_total || totalCost)
-      const confirmedAdvance = Math.round(confirmedTotal * 0.3 * 100) / 100
       sessionStorage.setItem(
         'bookingData',
         JSON.stringify({
@@ -370,12 +367,11 @@ export default function BookTaxi() {
           date,
           startTime,
           totalPrice: confirmedTotal,
-          advancePayment: confirmedAdvance,
           dbBookingId: result.booking.id,
           endTime: new Date(result.booking.end_datetime).toTimeString().slice(0, 5),
         })
       )
-      window.location.href = `/payment?bookingId=${bookingId}&amount=${confirmedAdvance}`
+      window.location.href = `/payment?bookingId=${bookingId}&amount=${confirmedTotal}`
     } catch {
       toast.error('Booking failed')
       setIsSubmitting(false)
@@ -1057,20 +1053,11 @@ export default function BookTaxi() {
                             <span>Total Amount</span>
                             <span className="font-semibold text-white">{formatCurrency(totalCost)}</span>
                           </div>
-                          <div className="h-px bg-white/10 my-2" />
-                          <div className="flex justify-between text-gray-300">
-                            <span>Prebook Advance (30%)</span>
-                            <span className="font-semibold text-secondary-200">{formatCurrency(advance)}</span>
-                          </div>
-                          <div className="flex justify-between text-gray-300">
-                            <span>Pay at Airport Counter (70%)</span>
-                            <span className="font-semibold text-secondary-200">{formatCurrency(remaining)}</span>
-                          </div>
                         </div>
                         <div className="mt-4 rounded-lg border border-white/15 bg-white/[0.04] p-3 text-xs md:text-sm text-gray-200 space-y-2">
-                          <p className="font-semibold text-white">Payment Options on next step:</p>
-                          <p>1. Pay <span className="font-bold text-white">{formatCurrency(totalCost)}</span> now online (full payment).</p>
-                          <p>2. Pay <span className="font-bold text-white">{formatCurrency(advance)}</span> now to prebook, then pay <span className="font-bold text-white">{formatCurrency(remaining)}</span> in cash at the airport counter.</p>
+                          <p className="font-semibold text-white">Payment options on the next step:</p>
+                          <p>1. Pay <span className="font-bold text-white">{formatCurrency(totalCost)}</span> now online to confirm your booking instantly.</p>
+                          <p>2. Send a booking request without paying — pay online anytime to confirm it, or pay <span className="font-bold text-white">{formatCurrency(totalCost)}</span> in cash when you arrive.</p>
                         </div>
                       </div>
 

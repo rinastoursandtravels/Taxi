@@ -150,8 +150,13 @@ export default function BookTour() {
     load()
   }, [tourId, router])
 
-  const totalPrice = tour ? toNum(tour.price) * passengers : 0
-  const advancePayment = Math.round(totalPrice * 0.3 * 100) / 100
+  // Tour prices are FLAT per vehicle, not per person — the package books the
+  // whole car, which is why tour_packages carries car_model and max_passengers.
+  // Passenger count is still chosen by the customer (and capped at the vehicle
+  // capacity) but does not affect the price. This matches what the server has
+  // always charged: /api/bookings/create derives amount_total from
+  // tour_packages.price alone and ignores any client-supplied amount.
+  const totalPrice = tour ? toNum(tour.price) : 0
 
   const checkAvailability = async (selectedDate: string) => {
     if (!tour?.car_model || !selectedDate) { setCapacityWarning(null); return }
@@ -240,6 +245,11 @@ export default function BookTour() {
       }
       const savedBooking = result.booking
       const displayTime = formatDisplayTime(tour.arrival_time)
+      // Trust the server's amount, never the locally computed one. The taxi
+      // flow has always done this; tours did not, which is how the old
+      // per-person display drifted from the flat price actually charged.
+      const confirmedTotal = Number(savedBooking.amount_total ?? totalPrice)
+
       sessionStorage.removeItem('bookingData')
       sessionStorage.setItem(
         'tourBookingData',
@@ -248,11 +258,11 @@ export default function BookTour() {
           name: name.trim(), phone: phone.trim(), email: email.trim(),
           passengers, date, time: displayTime, startTime: displayTime,
           car: tour.car_model || '', carType: tour.car_model || '',
-          totalPrice, advancePayment, dbBookingId: savedBooking.id,
+          totalPrice: confirmedTotal, dbBookingId: savedBooking.id,
         })
       )
       toast.success('Booking created! Redirecting to payment...')
-      window.location.href = `/payment?bookingId=${bookingId}&type=tour&amount=${advancePayment}`
+      window.location.href = `/payment?bookingId=${bookingId}&type=tour&amount=${confirmedTotal}`
     } catch (err) {
       console.error('Booking error:', err)
       toast.error('An error occurred. Please try again.')
@@ -372,7 +382,7 @@ export default function BookTour() {
                       </button>
                     </div>
                     <p className="text-sm text-gray-500 mt-3">
-                      {passengers} {passengers === 1 ? 'person' : 'people'} × ₹{toNum(tour.price).toFixed(0)} per person
+                      {passengers} {passengers === 1 ? 'person' : 'people'} — price covers the whole vehicle
                     </p>
                   </div>
                   <div className="bg-secondary-500/10 border border-secondary-500/25 rounded-xl p-4">
@@ -381,7 +391,7 @@ export default function BookTour() {
                       <span className="text-2xl font-black text-secondary-500">₹{totalPrice.toFixed(0)}</span>
                     </div>
                     <p className="text-xs text-gray-500 mt-1">
-                      Or prebook with ₹{advancePayment.toFixed(0)} (30% advance) — choose on next screen.
+                      Flat price for the full package — pay online or request to pay later on the next screen.
                     </p>
                   </div>
                 </div>
@@ -479,7 +489,7 @@ export default function BookTour() {
                     </div>
                   )}
                   <div className="mt-4 bg-secondary-500/10 border border-secondary-500/25 rounded-xl p-3 text-xs text-gray-400">
-                    Pay full online or prebook with ₹{advancePayment.toFixed(2)} (30%) — choose on the next screen.
+                    Pay in full online, or send a booking request and settle in cash — choose on the next screen.
                     Please arrive at least 15 minutes before departure at {departureTime}.
                   </div>
                 </div>
@@ -543,16 +553,16 @@ export default function BookTour() {
                   )}
                   <div className="border-t border-primary-800 pt-3 mt-3 space-y-1.5">
                     <div className="flex justify-between text-xs">
-                      <span className="text-gray-500">₹{toNum(tour.price).toFixed(0)} × {passengers} {passengers === 1 ? 'person' : 'people'}</span>
+                      <span className="text-gray-500">Package price (whole vehicle)</span>
                       <span className="text-gray-300">₹{totalPrice.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">Passengers</span>
+                      <span className="text-gray-300">{passengers}</span>
                     </div>
                     <div className="flex justify-between font-black text-sm border-t border-primary-800 pt-1.5">
                       <span className="text-gray-300">Total</span>
                       <span className="text-secondary-500">₹{totalPrice.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-gray-500">
-                      <span>Pay now (30%)</span>
-                      <span>₹{advancePayment.toFixed(2)}</span>
                     </div>
                   </div>
                 </div>

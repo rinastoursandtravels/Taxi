@@ -6,7 +6,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useAdmin } from '@/context/AdminContext'
 import { ProtectedAdminPage } from '@/components/ProtectedAdminPage'
-import { LogOut, Trash2 } from 'lucide-react'
+import { LogOut, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Booking } from '@/lib/db'
 
 type AdminApiResponse = {
@@ -91,14 +91,16 @@ type ToursResponse = {
 type Payment = {
   id: string
   booking_id: string
-  payment_type: 'partial' | 'full'
+  // 'cash' = a free booking, settled offline. 'partial' is legacy (30% advance).
+  payment_type: 'partial' | 'full' | 'cash'
   amount_total: number
   amount_online_paid: number
   amount_cash_paid: number
   txn_status: 'pending' | 'success' | 'failed'
   txn_id: string | null
   gateway: string | null
-  payment_status: 'pending' | 'partial' | 'paid'
+  // 'unpaid' = free booking awaiting collection. 'partial' is legacy.
+  payment_status: 'pending' | 'unpaid' | 'partial' | 'paid'
   cash_paid_at: string | null
   cash_collected_by: string | null
   created_at: string
@@ -194,7 +196,36 @@ function getPaymentStatusClass(status: string) {
   if (status === 'partial') {
     return 'bg-blue-100 text-blue-800'
   }
+  // Unpaid needs to read as "money outstanding, act on this" rather than as a
+  // neutral in-progress state, so it is deliberately louder than the rest.
+  if (status === 'unpaid') {
+    return 'bg-orange-100 text-orange-800 border border-orange-300'
+  }
   return 'bg-yellow-100 text-yellow-800'
+}
+
+/**
+ * How much longer an unpaid booking keeps its vehicle reserved.
+ *
+ * hold_expires_at is a TIMESTAMPTZ (a real instant), so it is parsed with
+ * new Date() — not the IST wall-clock helpers used for start/end datetimes.
+ */
+function formatHoldRemaining(holdExpiresAt: string | null | undefined) {
+  if (!holdExpiresAt) return null
+  const expiresMs = new Date(holdExpiresAt).getTime()
+  if (Number.isNaN(expiresMs)) return null
+
+  const diff = expiresMs - Date.now()
+  if (diff <= 0) return { label: 'payment window expired — slot reopened', expired: true }
+
+  const totalMinutes = Math.floor(diff / 60000)
+  const days = Math.floor(totalMinutes / 1440)
+  const hours = Math.floor((totalMinutes % 1440) / 60)
+  const minutes = totalMinutes % 60
+
+  if (days > 0) return { label: `vehicle held ${days}d ${hours}h more`, expired: false }
+  if (hours > 0) return { label: `vehicle held ${hours}h ${minutes}m more`, expired: false }
+  return { label: `vehicle held ${minutes}m more`, expired: false }
 }
 
 function bookingTypeLabel(type: string | null | undefined) {
@@ -354,6 +385,7 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('overview')
   const [statusFilter, setStatusFilter] = useState('all')
   const [assignmentFilter, setAssignmentFilter] = useState('all')
+  const [paymentFilter, setPaymentFilter] = useState('all')
   const [bookingSearchQuery, setBookingSearchQuery] = useState('')
   const [destinationSearchQuery, setDestinationSearchQuery] = useState('')
   const [bookings, setBookings] = useState<Booking[]>([])
@@ -455,6 +487,12 @@ export default function AdminDashboard() {
     if (typeof window === 'undefined') return false
     return localStorage.getItem('adminDarkMode') === '1'
   })
+  // Collapsed hides the tab bar down to a single reopen button — useful on
+  // screens like Fleet Schedule where the sticky bar eats vertical space.
+  const [tabBarCollapsed, setTabBarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('adminTabBarCollapsed') === '1'
+  })
   const [showAddAdmin, setShowAddAdmin] = useState(false)
   const [adminFormData, setAdminFormData] = useState({
     email: '',
@@ -500,6 +538,17 @@ export default function AdminDashboard() {
   const [reconciling, setReconciling] = useState(false)
   const [autoCleanupEnabled, setAutoCleanupEnabled] = useState(true)
   const [togglingAutoCleanup, setTogglingAutoCleanup] = useState(false)
+
+  // Free ("pay later") booking controls. Defaults mirror sql/free_booking.sql
+  // and lib/free-booking.ts so the panel shows the truth before settings load.
+  const [freeBookingTaxi, setFreeBookingTaxi] = useState(true)
+  const [freeBookingTour, setFreeBookingTour] = useState(true)
+  const [freeHoldTaxi, setFreeHoldTaxi] = useState(48)
+  const [freeHoldTour, setFreeHoldTour] = useState(24)
+  const [freeMinLead, setFreeMinLead] = useState(0)
+  const [freeMaxOpen, setFreeMaxOpen] = useState(2)
+  const [freeMaxAdvance, setFreeMaxAdvance] = useState(90)
+  const [savingFreeSetting, setSavingFreeSetting] = useState<string | null>(null)
 
   useEffect(() => {
     document.documentElement.style.overflowY = 'auto'
@@ -584,10 +633,37 @@ export default function AdminDashboard() {
             setLogsMaxRows(value)
             setLogsMaxRowsDraft(value)
           }
+          // Only an explicit 'false' switches free booking off, matching the
+          // server-side reading in lib/free-booking.
+          if (s.key === 'free_booking_enabled_taxi') setFreeBookingTaxi(s.value !== 'false')
+          if (s.key === 'free_booking_enabled_tour') setFreeBookingTour(s.value !== 'false')
+          if (s.key === 'free_booking_hold_hours_taxi') setFreeHoldTaxi(Number(s.value) || 0)
+          if (s.key === 'free_booking_hold_hours_tour') setFreeHoldTour(Number(s.value) || 0)
+          if (s.key === 'free_booking_min_lead_hours') setFreeMinLead(Number(s.value) || 0)
+          if (s.key === 'free_booking_max_open_per_user') setFreeMaxOpen(Number(s.value) || 0)
+          if (s.key === 'free_booking_max_advance_days') setFreeMaxAdvance(Number(s.value) || 0)
         }
       }
     } catch {
       // keep defaults
+    }
+  }
+
+  const saveFreeBookingSetting = async (key: string, value: string | number | boolean, label: string) => {
+    setSavingFreeSetting(key)
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PATCH',
+        headers: adminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ key, value: String(value) }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+      toast.success(`${label} saved.`)
+    } catch {
+      toast.error(`Failed to save ${label.toLowerCase()}.`)
+    } finally {
+      setSavingFreeSetting(null)
     }
   }
 
@@ -1701,6 +1777,23 @@ export default function AdminDashboard() {
       })
     }
 
+    if (paymentFilter !== 'all') {
+      result = result.filter((booking) => {
+        const payment = payments.find(
+          (p) => p.booking_id === (booking.booking_id || booking.id)
+        )
+        // No payments row at all means nobody has committed money or intent —
+        // an abandoned checkout. Group those with unpaid so the team sees
+        // everything outstanding in one view. Cancelled bookings are excluded:
+        // this filter is a follow-up queue, and there is nothing left to chase.
+        if (paymentFilter === 'unpaid') {
+          if (booking.booking_status === 'cancelled') return false
+          return !payment || payment.payment_status === 'unpaid' || payment.payment_status === 'pending'
+        }
+        return payment?.payment_status === paymentFilter
+      })
+    }
+
     if (bookingSearchQuery.trim()) {
       const q = bookingSearchQuery.toLowerCase()
       result = result.filter((booking) => {
@@ -1714,7 +1807,7 @@ export default function AdminDashboard() {
     }
 
     return result
-  }, [bookings, statusFilter, assignmentFilter, vehicleAssignments, cars, bookingSearchQuery])
+  }, [bookings, statusFilter, assignmentFilter, paymentFilter, payments, vehicleAssignments, cars, bookingSearchQuery])
 
   const filteredDestinations = useMemo(() => {
     const query = destinationSearchQuery.trim().toLowerCase()
@@ -2436,6 +2529,16 @@ export default function AdminDashboard() {
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
               </select>
+              <select
+                className="input-field text-sm flex-1 sm:w-auto"
+                value={paymentFilter}
+                onChange={(event) => setPaymentFilter(event.target.value)}
+              >
+                <option value="all">All Payments</option>
+                <option value="unpaid">Unpaid — needs follow-up</option>
+                <option value="partial">Partial (legacy)</option>
+                <option value="paid">Paid</option>
+              </select>
             </div>
           </div>
         </div>
@@ -2443,7 +2546,7 @@ export default function AdminDashboard() {
         {loadingBookings ? (
           <p className="text-gray-600">Loading bookings...</p>
         ) : filteredBookings.length === 0 ? (
-          <p className="text-gray-600">No bookings found{statusFilter !== 'all' ? ` with status "${statusFilter}"` : ''}.</p>
+          <p className="text-gray-600">No bookings found{statusFilter !== 'all' ? ` with status "${statusFilter}"` : ''}{paymentFilter !== 'all' ? ` with payment "${paymentFilter}"` : ''}.</p>
         ) : (
           <div className="space-y-3">
             {filteredBookings.map((booking) => {
@@ -2483,6 +2586,20 @@ export default function AdminDashboard() {
                       Cancellation Requested — awaiting admin review
                     </div>
                   )}
+                  {bookingPayment?.payment_status === 'unpaid' && booking.booking_status !== 'cancelled' && (() => {
+                    const hold = formatHoldRemaining(booking.hold_expires_at)
+                    return (
+                      <div className="bg-amber-50 border-b border-amber-300 px-3 md:px-4 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-amber-800 font-semibold">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                        UNPAID — Rs. {toNum(bookingPayment.amount_total).toFixed(2)} to collect
+                        {hold && (
+                          <span className={`font-medium ${hold.expired ? 'text-red-600' : 'text-amber-700'}`}>
+                            · {hold.label}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })()}
                   {/* Summary row — click to expand */}
                   <button
                     onClick={() => setExpandedBookingId(isExpanded ? null : booking.id)}
@@ -3009,7 +3126,7 @@ export default function AdminDashboard() {
                                 <dt>Total Collected</dt>
                                 <dd className="text-green-700">Rs. {(toNum(bookingPayment.amount_online_paid) + toNum(bookingPayment.amount_cash_paid)).toFixed(2)}</dd>
                               </div>
-                              {bookingPayment.payment_type === 'partial' && (
+                              {(bookingPayment.payment_type === 'partial' || bookingPayment.payment_type === 'cash') && (
                                 <div className="flex justify-between gap-2 font-semibold">
                                   <dt className="text-orange-600">Remaining Balance to Pay</dt>
                                   <dd className="text-orange-700">Rs. {Math.max(0, toNum(bookingPayment.amount_total) - (toNum(bookingPayment.amount_online_paid) + toNum(bookingPayment.amount_cash_paid))).toFixed(2)}</dd>
@@ -3085,13 +3202,13 @@ export default function AdminDashboard() {
                                   )}
                                 </div>
                               )}
-                              {bookingPayment.payment_status === 'partial' && (
+                              {(bookingPayment.payment_status === 'partial' || bookingPayment.payment_status === 'unpaid') && (
                                 <div className="flex gap-2 pt-4 border-t">
-                                  <button 
+                                  <button
                                     onClick={() => openCashCollectionModal(bookingPayment, booking)}
                                     className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm"
                                   >
-                                    Confirm Cash Payment
+                                    {bookingPayment.payment_status === 'unpaid' ? 'Record Cash Payment' : 'Confirm Cash Payment'}
                                   </button>
                                 </div>
                               )}
@@ -4954,6 +5071,20 @@ export default function AdminDashboard() {
     const paidBookings = revenuePayments.filter((p) => p.payment_status === 'paid').length
     const partialPayments = revenuePayments.filter((p) => p.payment_status === 'partial').length
     const pendingPayments = revenuePayments.filter((p) => p.payment_status === 'pending').length
+    // Free bookings awaiting collection. Deliberately NOT taken from
+    // revenuePayments: that set is limited to confirmed/completed bookings,
+    // and an unpaid booking is still 'pending' — it would always count zero.
+    // Cancelled bookings are excluded since there is nothing left to chase.
+    const unpaidPayments = payments.filter((p) => {
+      if (p.payment_status !== 'unpaid') return false
+      const status = bookingStatusById.get(p.booking_id)
+      return status !== 'cancelled'
+    })
+    const unpaidBookings = unpaidPayments.length
+    const unpaidValue = unpaidPayments.reduce(
+      (sum, p) => sum + Math.max(0, toNum(p.amount_total) - toNum(p.amount_online_paid) - toNum(p.amount_cash_paid)),
+      0
+    )
     const totalOutstanding = revenueSnapshot.totalOutstanding
 
     // Real booking trend - group by date (last 7 days)
@@ -5070,6 +5201,8 @@ export default function AdminDashboard() {
       paidBookings,
       partialPayments,
       pendingPayments,
+      unpaidBookings,
+      unpaidValue,
       totalOutstanding,
       completedBookings,
       confirmedBookings,
@@ -5267,6 +5400,12 @@ export default function AdminDashboard() {
     localStorage.setItem('adminDarkMode', next ? '1' : '0')
   }
 
+  const toggleTabBarCollapsed = () => {
+    const next = !tabBarCollapsed
+    setTabBarCollapsed(next)
+    localStorage.setItem('adminTabBarCollapsed', next ? '1' : '0')
+  }
+
   const renderMisc = () => (
     <div className="space-y-4 md:space-y-6">
       <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
@@ -5274,6 +5413,77 @@ export default function AdminDashboard() {
         <p className="text-xs md:text-sm text-gray-500 mb-4 md:mb-6">Admin panel configuration and utilities</p>
 
         <div className="space-y-2 md:space-y-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Free Booking (Pay Later)</p>
+
+          <div className="px-3 md:px-4 py-3 md:py-4 rounded-lg border border-gray-200 space-y-4">
+            <p className="text-xs md:text-sm text-gray-500">
+              Lets customers submit a booking without paying. The booking is recorded as
+              <span className="font-semibold text-orange-700"> unpaid</span> and reserves that vehicle
+              <span className="font-semibold"> only for the customer&apos;s own trip slot</span> — every other date
+              and time stays bookable. If nobody pays within the window below, the slot reopens to other
+              customers while the booking stays in your list for follow-up.
+            </p>
+
+            {([
+              { key: 'free_booking_enabled_taxi', label: 'Taxi bookings', value: freeBookingTaxi, set: setFreeBookingTaxi },
+              { key: 'free_booking_enabled_tour', label: 'Tour bookings', value: freeBookingTour, set: setFreeBookingTour },
+            ] as const).map((row) => (
+              <div key={row.key} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm md:text-base">{row.label}</p>
+                  <p className="text-xs text-gray-500">
+                    {row.value ? 'Customers can book without paying' : 'Online payment required'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    const next = !row.value
+                    row.set(next)
+                    void saveFreeBookingSetting(row.key, next, row.label)
+                  }}
+                  disabled={savingFreeSetting === row.key}
+                  aria-label={`Toggle free booking for ${row.label}`}
+                  className={`relative inline-flex items-center w-12 md:w-14 h-6 md:h-7 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-secondary-500 focus:ring-offset-2 shrink-0 disabled:opacity-50 ${row.value ? 'bg-green-500' : 'bg-gray-300'}`}
+                >
+                  <span className={`inline-block w-5 md:w-6 h-5 md:h-6 bg-white rounded-full shadow transform transition-transform duration-300 ${row.value ? 'translate-x-6 md:translate-x-7' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+            ))}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+              {([
+                { key: 'free_booking_hold_hours_taxi', label: 'Taxi payment window (hours)', value: freeHoldTaxi, set: setFreeHoldTaxi, hint: 'Time to pay before the slot reopens. 0 = never holds a slot' },
+                { key: 'free_booking_hold_hours_tour', label: 'Tour payment window (hours)', value: freeHoldTour, set: setFreeHoldTour, hint: 'Time to pay before the slot reopens. 0 = never holds a slot' },
+                { key: 'free_booking_min_lead_hours', label: 'Minimum notice (hours)', value: freeMinLead, set: setFreeMinLead, hint: '0 = allow last-minute' },
+                { key: 'free_booking_max_open_per_user', label: 'Max open unpaid per customer', value: freeMaxOpen, set: setFreeMaxOpen, hint: 'Counted per login account' },
+                { key: 'free_booking_max_advance_days', label: 'Max days in advance', value: freeMaxAdvance, set: setFreeMaxAdvance, hint: '' },
+              ] as const).map((row) => (
+                <div key={row.key}>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">{row.label}</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      value={row.value}
+                      onChange={(e) => row.set(Math.max(0, Number(e.target.value) || 0))}
+                      className="input-field text-sm flex-1"
+                    />
+                    <button
+                      onClick={() => void saveFreeBookingSetting(row.key, row.value, row.label)}
+                      disabled={savingFreeSetting === row.key}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-50"
+                    >
+                      {savingFreeSetting === row.key ? '...' : 'Save'}
+                    </button>
+                  </div>
+                  {row.hint && <p className="text-[11px] text-gray-400 mt-1">{row.hint}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2 md:space-y-3 pt-4 md:pt-6">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Appearance</p>
 
           <div className="flex items-center justify-between gap-3 px-3 md:px-4 py-3 md:py-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-smooth cursor-default active:bg-gray-100">
@@ -6102,6 +6312,15 @@ export default function AdminDashboard() {
               <span className="text-gray-600">Partial Payments</span>
               <span className="font-semibold">{analytics.partialPayments}</span>
             </div>
+            <div className="flex items-center justify-between text-xs md:text-sm">
+              <span className="text-orange-700 font-semibold">Unpaid — to collect</span>
+              <span className="font-semibold text-orange-700">
+                {analytics.unpaidBookings}
+                {analytics.unpaidBookings > 0 && (
+                  <span className="font-normal"> · Rs. {analytics.unpaidValue.toLocaleString('en-IN', { notation: 'compact' })}</span>
+                )}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -6476,44 +6695,87 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Tab bar — responsive wrapping on mobile, no scroll needed */}
-          <div className={`sticky top-[60px] md:top-[72px] z-40 flex flex-wrap gap-1 md:gap-2 mb-4 md:mb-6 lg:mb-8 rounded-lg border backdrop-blur-sm shadow-[0_12px_30px_rgba(15,23,42,0.14)] p-2 md:p-3 lg:p-4 ${
-            darkMode
-              ? 'border-primary-700/70 bg-primary-900/92'
-              : 'border-gray-200/80 bg-white/95'
-          }`}>
-            {(() => {
-              const pendingCancellations = bookings.filter(b => b.cancellation_requested_at && b.booking_status !== 'cancelled').length
-              return [
-                { id: 'overview', label: 'Overview', badge: 0 },
-                { id: 'bookings', label: 'Bookings', badge: pendingCancellations },
-                { id: 'car-management', label: 'Cars', badge: 0 },
-                { id: 'destinations', label: 'Destinations', badge: 0 },
-                { id: 'tours', label: 'Tours', badge: 0 },
-                { id: 'analytics', label: 'Analytics', badge: 0 },
-                { id: 'misc', label: 'Misc', badge: 0 },
-              ].map((tab) => (
+          {/* Tab bar — responsive wrapping on mobile, no scroll needed.
+              Collapsible: on views like Fleet Schedule the sticky bar eats
+              vertical space, so it can be minimised down to a single strip. */}
+          {(() => {
+            const pendingCancellations = bookings.filter(b => b.cancellation_requested_at && b.booking_status !== 'cancelled').length
+            const tabs = [
+              { id: 'overview', label: 'Overview', badge: 0 },
+              { id: 'bookings', label: 'Bookings', badge: pendingCancellations },
+              { id: 'car-management', label: 'Cars', badge: 0 },
+              { id: 'destinations', label: 'Destinations', badge: 0 },
+              { id: 'tours', label: 'Tours', badge: 0 },
+              { id: 'analytics', label: 'Analytics', badge: 0 },
+              { id: 'misc', label: 'Misc', badge: 0 },
+            ]
+            const activeTabLabel = tabs.find(t => t.id === activeTab)?.label || 'Menu'
+            const totalBadge = tabs.reduce((sum, t) => sum + t.badge, 0)
+
+            if (tabBarCollapsed) {
+              return (
+                <div className={`sticky top-[60px] md:top-[72px] z-40 flex items-center justify-between mb-4 md:mb-6 lg:mb-8 rounded-lg border backdrop-blur-sm shadow-[0_12px_30px_rgba(15,23,42,0.14)] px-3 py-2 md:px-4 md:py-2.5 ${
+                  darkMode
+                    ? 'border-primary-700/70 bg-primary-900/92'
+                    : 'border-gray-200/80 bg-white/95'
+                }`}>
+                  <button
+                    onClick={toggleTabBarCollapsed}
+                    className={`flex items-center gap-2 text-xs sm:text-sm font-semibold ${darkMode ? 'text-gray-200' : 'text-gray-700'}`}
+                    aria-expanded={false}
+                    aria-label="Expand tab bar"
+                  >
+                    <ChevronDown size={16} />
+                    <span>{activeTabLabel}</span>
+                    {totalBadge > 0 && (
+                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
+                        {totalBadge}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )
+            }
+
+            return (
+              <div className={`sticky top-[60px] md:top-[72px] z-40 flex flex-wrap items-center gap-1 md:gap-2 mb-4 md:mb-6 lg:mb-8 rounded-lg border backdrop-blur-sm shadow-[0_12px_30px_rgba(15,23,42,0.14)] p-2 md:p-3 lg:p-4 ${
+                darkMode
+                  ? 'border-primary-700/70 bg-primary-900/92'
+                  : 'border-gray-200/80 bg-white/95'
+              }`}>
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`relative px-2 sm:px-3 md:px-5 lg:px-6 py-1.5 sm:py-2 md:py-2.5 lg:py-3 rounded-lg font-semibold transition-smooth text-xs sm:text-sm md:text-base whitespace-nowrap ${
+                      activeTab === tab.id
+                        ? 'bg-secondary-500 text-primary-950'
+                        : darkMode
+                        ? 'text-gray-300 hover:bg-primary-800'
+                        : 'text-gray-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    {tab.label}
+                    {tab.badge > 0 && (
+                      <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                ))}
                 <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`relative px-2 sm:px-3 md:px-5 lg:px-6 py-1.5 sm:py-2 md:py-2.5 lg:py-3 rounded-lg font-semibold transition-smooth text-xs sm:text-sm md:text-base whitespace-nowrap ${
-                    activeTab === tab.id
-                      ? 'bg-secondary-500 text-primary-950'
-                      : darkMode
-                      ? 'text-gray-300 hover:bg-primary-800'
-                      : 'text-gray-700 hover:bg-gray-100'
+                  onClick={toggleTabBarCollapsed}
+                  aria-expanded={true}
+                  aria-label="Collapse tab bar"
+                  className={`ml-auto flex items-center justify-center w-8 h-8 md:w-9 md:h-9 rounded-lg transition-smooth ${
+                    darkMode ? 'text-gray-400 hover:bg-primary-800 hover:text-gray-200' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
                   }`}
                 >
-                  {tab.label}
-                  {tab.badge > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
-                      {tab.badge}
-                    </span>
-                  )}
+                  <ChevronUp size={18} />
                 </button>
-              ))
-            })()}
-          </div>
+              </div>
+            )
+          })()}
 
           {activeTab === 'overview' && renderOverview()}
           {activeTab === 'bookings' && renderBookings()}

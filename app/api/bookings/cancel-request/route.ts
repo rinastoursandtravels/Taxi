@@ -42,6 +42,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 })
     }
 
+    // Read the free-booking columns separately, mirroring the defensive pattern
+    // used below: a missing migration column must not break the whole lookup.
+    const { data: freeBookingCheck } = await supabaseAdmin
+      .from('bookings')
+      .select('payment_mode')
+      .eq('id', booking.id)
+      .maybeSingle()
+
+    const isUnpaidRequest =
+      booking.booking_status === 'pending' && freeBookingCheck?.payment_mode === 'pay_later'
+
+    // An unpaid booking has no money attached, so there is nothing for an admin
+    // to review or refund. Cancel it outright and release the vehicle hold
+    // immediately, rather than queueing a request the way a paid booking must.
+    if (isUnpaidRequest) {
+      const { error: cancelError } = await supabaseAdmin
+        .from('bookings')
+        .update({
+          booking_status: 'cancelled',
+          hold_expires_at: null,
+          cancellation_requested_at: new Date().toISOString(),
+          cancellation_reason: reason?.trim() || 'Cancelled by customer (unpaid booking)',
+        })
+        .eq('id', booking.id)
+        .eq('booking_status', 'pending')
+
+      if (cancelError) {
+        console.error('[CANCEL-REQUEST] Unpaid cancel failed:', cancelError)
+        return NextResponse.json(
+          { success: false, error: 'Failed to cancel booking' },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json({
+        success: true,
+        cancelled: true,
+        message: 'Booking cancelled',
+      })
+    }
+
     if (booking.booking_status !== 'confirmed') {
       return NextResponse.json(
         { success: false, error: 'Only confirmed bookings can be cancelled' },

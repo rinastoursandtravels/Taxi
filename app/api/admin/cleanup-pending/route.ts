@@ -31,10 +31,16 @@ async function deleteExpiredPendingBookings(timeoutDays: number) {
 
   const cutoff = new Date(Date.now() - timeoutDays * 24 * 60 * 60 * 1000).toISOString()
 
+  // Only abandoned online checkouts are ever deleted here. A 'pay_later'
+  // booking is a deliberate customer request that the Rina's team follows up
+  // on, so it must NEVER be auto-deleted no matter how old it gets. Its
+  // vehicle hold lapses separately via hold_expires_at, which frees the car
+  // for other customers without destroying the lead.
   const { data: staleBookings, error: fetchError } = await supabaseAdmin
     .from('bookings')
     .select('id, booking_id')
     .eq('booking_status', 'pending')
+    .eq('payment_mode', 'online_full')
     .lt('created_at', cutoff)
 
   if (fetchError) throw fetchError

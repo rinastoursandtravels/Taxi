@@ -1,6 +1,6 @@
 'use client'
 
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { useEffect, useState, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import Header from '@/components/Header'
@@ -17,6 +17,7 @@ function formatTimeFromDateTime(value?: string | null): string | undefined {
 
 function BookingConfirmedContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const successRef = useRef<HTMLDivElement | null>(null)
   const gridRef = useRef<HTMLDivElement | null>(null)
@@ -132,9 +133,22 @@ function BookingConfirmedContent() {
       carType,
       totalAmount: parseFloat(payment.amount_total),
       advanceAmount: parseFloat(payment.amount_online_paid),
-      remainingAmount: payment.payment_type === 'full' ? 0 : parseFloat(payment.amount_total) - parseFloat(payment.amount_online_paid),
+      // Cash already collected counts as settled — see the same fix in the
+      // bookings page invoice.
+      remainingAmount: payment.payment_type === 'full'
+        ? 0
+        : Math.max(
+            parseFloat(payment.amount_total) -
+              parseFloat(payment.amount_online_paid) -
+              parseFloat(payment.amount_cash_paid || '0'),
+            0
+          ),
       paymentStatus: payment.payment_status === 'paid' ? 'completed' : payment.payment_status,
-      paymentMethod: payment.payment_type === 'full' ? 'Full Online Payment' : 'Partial Online + Cash',
+      paymentMethod: payment.payment_type === 'full'
+        ? 'Full Online Payment'
+        : parseFloat(payment.amount_online_paid) > 0
+          ? 'Partial Online + Cash'
+          : 'Cash Payment',
       invoiceNumber,
     }
     const doc = await generateInvoicePDF(invoiceData)
@@ -155,9 +169,60 @@ function BookingConfirmedContent() {
     )
   }
 
-  const isFullPay = payment?.payment_type === 'full'
-  const totalPaid = payment ? parseFloat(payment.amount_online_paid) : booking.advancePayment
-  const remaining = isFullPay ? 0 : (payment ? parseFloat(payment.amount_total) - parseFloat(payment.amount_online_paid) : booking.totalPrice - booking.advancePayment)
+  // A free booking arrives here with the flag set by the payment page, and is
+  // confirmed by the payments row once it loads. Nothing was paid and — per the
+  // agreed messaging rules — no email was sent, so this page must not claim
+  // either.
+  const isUnpaid = searchParams.get('unpaid') === '1' || payment?.payment_status === 'unpaid'
+  const totalAmount = payment ? parseFloat(payment.amount_total) : booking.totalPrice
+  const onlinePaid = isUnpaid ? 0 : (payment ? parseFloat(payment.amount_online_paid) : 0)
+  const cashPaid = isUnpaid ? 0 : (payment ? parseFloat(payment.amount_cash_paid || '0') : 0)
+
+  // The payment record fetch is still in flight or failed — this is NOT the
+  // free-booking case (which knows its own state without needing `payment` at
+  // all). Treating a still-null `payment` as "nothing paid" here would show a
+  // customer who just paid successfully a false "advance paid, balance due"
+  // message while their real payment simply hasn't loaded back yet.
+  const paymentUnresolved = !isUnpaid && !payment
+
+  // Fully settled by ANY combination of online + cash — not just
+  // payment_type literally being 'full'. That literal check used to miss a
+  // free ("cash") booking that was fully paid in cash, and a legacy 30%
+  // booking whose remaining balance was later topped up in cash: both are
+  // completely paid, but neither has payment_type === 'full'.
+  const isFullyPaid = !isUnpaid && !!payment && onlinePaid + cashPaid >= totalAmount - 0.01
+  const remaining = paymentUnresolved ? 0 : Math.max(0, totalAmount - onlinePaid - cashPaid)
+
+  // How much longer this free booking's vehicle hold lasts. Passed through
+  // from the payment page's confirm-unpaid response — this is the one place
+  // that instant is known before the bookings list is fetched from the DB.
+  // hold_expires_at is a TIMESTAMPTZ (a real instant), so new Date() is
+  // correct here, never the IST wall-clock helpers used for trip times.
+  const holdUntilParam = searchParams.get('holdUntil')
+  const holdCountdown = (() => {
+    if (!holdUntilParam) return null
+    const expiresMs = new Date(holdUntilParam).getTime()
+    if (Number.isNaN(expiresMs)) return null
+    const diff = expiresMs - Date.now()
+    if (diff <= 0) return { label: 'Deadline passed', expired: true }
+    const totalMinutes = Math.floor(diff / 60000)
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    const label = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
+    return { label, expired: false }
+  })()
+
+  // Re-uses the exact sessionStorage payload this page was itself loaded
+  // from — it already has everything /payment needs (dbBookingId, totalPrice,
+  // contact details) — so paying now needs no extra lookup. This button only
+  // ever renders on the isUnpaid branch, so payment_mode is known to already
+  // be 'pay_later' — stamping it explicitly is what stops /payment from
+  // re-offering "Book Now, Pay Later" on a booking that already chose it.
+  const handlePayNow = () => {
+    const storageKey = booking.bookingType === 'tour' ? 'tourBookingData' : 'bookingData'
+    sessionStorage.setItem(storageKey, JSON.stringify({ ...booking, paymentMode: 'pay_later' }))
+    router.push(`/payment?bookingId=${booking.bookingId}&type=${booking.bookingType === 'tour' ? 'tour' : 'taxi'}`)
+  }
 
   return (
     <div ref={scrollRef} className="scrollbar-thin-modern h-[100dvh] overflow-y-auto overflow-x-hidden bg-primary-950">
@@ -205,11 +270,25 @@ function BookingConfirmedContent() {
                 </div>
               </div>
             </div>
-            <p className="confirm-text text-secondary-500 font-semibold text-xs tracking-[0.22em] uppercase mb-2">Booking Confirmed</p>
-            <h1 className="confirm-text font-black text-white text-2xl md:text-3xl mb-2">You&apos;re all set!</h1>
+            <p className="confirm-text text-secondary-500 font-semibold text-xs tracking-[0.22em] uppercase mb-2">
+              {isUnpaid ? 'Request Received' : 'Booking Confirmed'}
+            </p>
+            <h1 className="confirm-text font-black text-white text-2xl md:text-3xl mb-2">
+              {isUnpaid ? 'We’ve got your request' : 'You’re all set!'}
+            </h1>
             <p className="confirm-text text-gray-400 text-sm">
-              Your {booking.bookingType === 'tour' ? 'tour package' : 'taxi'} booking is confirmed. Confirmation sent to{' '}
-              <span className="text-secondary-500">{booking.email}</span>
+              {isUnpaid ? (
+                <>
+                  Your {booking.bookingType === 'tour' ? 'tour package' : 'taxi'} request has been recorded and is{' '}
+                  <span className="text-secondary-500">not yet confirmed</span>. Your date and time are held — pay
+                  before the deadline below to lock them in, online now or in cash with our team.
+                </>
+              ) : (
+                <>
+                  Your {booking.bookingType === 'tour' ? 'tour package' : 'taxi'} booking is confirmed. Confirmation sent to{' '}
+                  <span className="text-secondary-500">{booking.email}</span>
+                </>
+              )}
             </p>
           </div>
 
@@ -274,34 +353,70 @@ function BookingConfirmedContent() {
               <div className="space-y-0 divide-y divide-primary-800 mb-4">
                 <div className="py-2.5 flex justify-between text-sm">
                   <span className="text-gray-500">Total Amount</span>
-                  <span className="text-white font-semibold">₹{(payment?.amount_total || booking.totalPrice).toFixed(2)}</span>
+                  <span className="text-white font-semibold">₹{totalAmount.toFixed(2)}</span>
                 </div>
-                <div className="py-2.5 flex justify-between text-sm">
-                  <span className="text-gray-500">Paid Online</span>
-                  <span className="text-green-400 font-black">₹{totalPaid.toFixed(2)}</span>
-                </div>
-                {!isFullPay && remaining > 0 && (
+                {/* Nothing below this line is shown while paymentUnresolved —
+                    we genuinely don't know these numbers yet, and a wrong
+                    guess is worse than a brief gap. */}
+                {!isUnpaid && !paymentUnresolved && (
                   <div className="py-2.5 flex justify-between text-sm">
-                    <span className="text-gray-500">Due at Airport</span>
+                    <span className="text-gray-500">Paid Online</span>
+                    <span className="text-green-400 font-black">₹{onlinePaid.toFixed(2)}</span>
+                  </div>
+                )}
+                {!isUnpaid && !paymentUnresolved && cashPaid > 0 && (
+                  <div className="py-2.5 flex justify-between text-sm">
+                    <span className="text-gray-500">Paid in Cash</span>
+                    <span className="text-green-400 font-black">₹{cashPaid.toFixed(2)}</span>
+                  </div>
+                )}
+                {!isFullyPaid && !paymentUnresolved && remaining > 0 && (
+                  <div className="py-2.5 flex justify-between text-sm">
+                    <span className="text-gray-500">{isUnpaid ? 'Amount Due' : 'Balance Due'}</span>
                     <span className="text-secondary-500 font-semibold">₹{remaining.toFixed(2)}</span>
+                  </div>
+                )}
+                {isUnpaid && holdCountdown && (
+                  <div className="py-2.5 flex justify-between text-sm">
+                    <span className="text-gray-500">Pay Within</span>
+                    <span className={`font-semibold ${holdCountdown.expired ? 'text-red-400' : 'text-amber-400'}`}>
+                      {holdCountdown.expired ? holdCountdown.label : `${holdCountdown.label} left`}
+                    </span>
                   </div>
                 )}
               </div>
 
-              <div className={`rounded-xl p-3 text-xs mb-4 ${isFullPay ? 'bg-green-500/10 border border-green-500/25 text-green-400' : 'bg-secondary-500/10 border border-secondary-500/25 text-gray-400'}`}>
-                {isFullPay
-                  ? '✅ Full payment completed. No additional payment required.'
-                  : '30% advance paid. Remaining 70% to be paid in cash at the airport office.'}
+              <div className={`rounded-xl p-3 text-xs mb-4 ${isFullyPaid ? 'bg-green-500/10 border border-green-500/25 text-green-400' : 'bg-secondary-500/10 border border-secondary-500/25 text-gray-400'}`}>
+                {isUnpaid
+                  ? holdCountdown && !holdCountdown.expired
+                    ? 'No payment made yet. Your slot is held until the deadline above — pay online now, or in cash with our team, to lock it in.'
+                    : 'No payment made yet. The deadline has passed, so this slot has been reopened to other customers — pay now to reclaim it if it is still free, or contact our team to check availability.'
+                  : paymentUnresolved
+                    ? 'Confirming your payment — this can take a few seconds. If it doesn’t update, refresh this page or check your Bookings tab.'
+                    : isFullyPaid
+                      ? '✅ Full payment completed. No additional payment required.'
+                      : 'Part of the total has been settled. The remaining balance is to be paid in cash to our team.'}
               </div>
 
-              <button
-                onClick={generateAndDownloadInvoice}
-                disabled={!payment}
-                className="mt-auto w-full flex items-center justify-center gap-2 py-3 bg-secondary-500 text-primary-950 font-black rounded-xl hover:bg-secondary-400 transition-colors disabled:opacity-40 text-sm"
-              >
-                <Download size={15} />
-                Download Invoice
-              </button>
+              {/* Nothing has been paid, so there is no invoice to issue yet —
+                  paying online here is the fastest way to lock the booking in. */}
+              {isUnpaid ? (
+                <button
+                  onClick={handlePayNow}
+                  className="mt-auto w-full flex items-center justify-center gap-2 py-3 bg-secondary-500 text-primary-950 font-black rounded-xl hover:bg-secondary-400 transition-colors text-sm"
+                >
+                  Pay Now to Guarantee
+                </button>
+              ) : (
+                <button
+                  onClick={generateAndDownloadInvoice}
+                  disabled={!payment}
+                  className="mt-auto w-full flex items-center justify-center gap-2 py-3 bg-secondary-500 text-primary-950 font-black rounded-xl hover:bg-secondary-400 transition-colors disabled:opacity-40 text-sm"
+                >
+                  <Download size={15} />
+                  {paymentUnresolved ? 'Confirming Payment...' : 'Download Invoice'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -309,12 +424,20 @@ function BookingConfirmedContent() {
           <div ref={whatsNextRef} className="max-w-4xl mx-auto bg-primary-900/60 border border-primary-800 rounded-2xl backdrop-blur-sm p-5 mb-5">
             <p className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-4">What&apos;s Next</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                { n: '1', title: 'Confirmation Sent', desc: 'Check your email for booking details and invoice' },
-                { n: '2', title: 'Driver Assignment', desc: 'Within 2 hours you\'ll receive driver and vehicle details' },
-                { n: '3', title: 'Arrive Early', desc: 'Please arrive 15 minutes before your scheduled pickup time' },
-                { n: '4', title: 'Complete Payment', desc: 'In case you prebooked, pay the remaining amount in cash at the airport office to get your driver assigned' },
-              ].map(({ n, title, desc }) => (
+              {(isUnpaid
+                ? [
+                    { n: '1', title: 'Pay to Lock It In', desc: 'Pay online here any time before your deadline — or in cash if your trip is sooner' },
+                    { n: '2', title: 'Track Your Status', desc: 'Visit your Bookings tab anytime to see your payment deadline and pay when you’re ready' },
+                    { n: '3', title: 'Driver Assignment', desc: 'Driver and vehicle details are shared once payment is received' },
+                    { n: '4', title: 'Arrive Early', desc: 'Please arrive 15 minutes before your scheduled pickup time' },
+                  ]
+                : [
+                    { n: '1', title: 'Confirmation Sent', desc: 'Check your email for booking details and invoice' },
+                    { n: '2', title: 'Driver Assignment', desc: 'Within 2 hours you\'ll receive driver and vehicle details' },
+                    { n: '3', title: 'Arrive Early', desc: 'Please arrive 15 minutes before your scheduled pickup time' },
+                    { n: '4', title: 'Complete Payment', desc: 'If a balance remains, pay it in cash to our team to get your driver assigned' },
+                  ]
+              ).map(({ n, title, desc }) => (
                 <div key={n} className="flex flex-col gap-2">
                   <div className="w-7 h-7 rounded-full bg-secondary-500 text-primary-950 flex items-center justify-center font-black text-xs flex-shrink-0">
                     {n}

@@ -17,6 +17,8 @@ export type ConflictBooking = {
   booking_status: ActiveBookingStatus | string
   passenger_count?: number | null
   created_at?: string | null
+  /** TIMESTAMPTZ — read isVehicleHoldActive before comparing this to anything. */
+  hold_expires_at?: string | null
 }
 
 export type ConflictAssignment = {
@@ -96,6 +98,45 @@ export function toLocalTimeMs(value: string | null | undefined): number {
   )
 }
 
+/**
+ * Whether a booking still holds its vehicle against other customers.
+ *
+ * A free ("pay later") booking reserves its car only for a limited window, so
+ * an unpaid request cannot lock up the fleet indefinitely. Once that window
+ * lapses the car becomes bookable by others, while the booking row itself
+ * survives untouched for the Rina's team to follow up on.
+ *
+ * IMPORTANT: hold_expires_at is a TIMESTAMPTZ — a real instant — unlike
+ * start_datetime / end_datetime, which are naive IST wall-clock strings. Parse
+ * it with `new Date()`, never with toLocalTimeMs() above.
+ *
+ * toLocalTimeMs discards the offset and reads the wall clock as UTC. That is
+ * harmless while Postgres serialises timestamptz as UTC ("...+00:00"), which is
+ * the Supabase default, so both parsers agree today. It stops being harmless
+ * the moment the database timezone is set to Asia/Kolkata: values then arrive
+ * as "...+05:30" and toLocalTimeMs reads them 5h30m late, quietly extending
+ * every vehicle hold. `new Date()` is correct under either configuration.
+ */
+export function isVehicleHoldActive(
+  booking: Pick<ConflictBooking, 'booking_status' | 'hold_expires_at'>,
+  now: number = Date.now()
+): boolean {
+  // A confirmed booking is paid for and holds its vehicle unconditionally.
+  if (booking.booking_status === 'confirmed') return true
+
+  // No expiry set — every booking made before free booking existed, plus any
+  // online checkout still in progress. Holds indefinitely, as it always has.
+  if (!booking.hold_expires_at) return true
+
+  const expiresAt = new Date(booking.hold_expires_at).getTime()
+
+  // Unparseable value: keep holding. Failing safe means a customer might keep a
+  // car slightly too long, never that a real booking silently loses its vehicle.
+  if (Number.isNaN(expiresAt)) return true
+
+  return expiresAt > now
+}
+
 function formatLocalMsWithISTOffset(ms: number): string {
   const d = new Date(ms)
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -167,7 +208,7 @@ async function loadFleetState(): Promise<FleetState> {
   const [bookingsResult, assignmentsResult, carsResult] = await Promise.all([
     supabaseAdmin
       .from('bookings')
-      .select('id, booking_id, user_name, user_email, phone, car_model, booking_type, start_datetime, end_datetime, booking_status, passenger_count, created_at')
+      .select('id, booking_id, user_name, user_email, phone, car_model, booking_type, start_datetime, end_datetime, booking_status, passenger_count, created_at, hold_expires_at')
       .in('booking_status', [...ACTIVE_BOOKING_STATUSES]),
     supabaseAdmin
       .from('vehicle_assignments')
@@ -182,8 +223,30 @@ async function loadFleetState(): Promise<FleetState> {
   if (assignmentsResult.error) throw new Error('Failed to fetch vehicle assignments')
   if (carsResult.error) throw new Error('Failed to fetch active cars')
 
+  // Filtering here rather than at each call site means every consumer of fleet
+  // state — availability snapshots, the model quota check, and the conflict
+  // scanner — agrees on which bookings currently hold a vehicle.
+  //
+  // A booking that already has a vehicle assigned always holds it, whatever its
+  // expiry says. In practice an unpaid booking can never reach that state (it
+  // cannot be assigned until payment is confirmed), so this is pure defence: it
+  // guarantees a car with real work against it can never be handed to someone
+  // else, even if a stale hold_expires_at survives some future status change.
+  const now = Date.now()
+  const assignedBookingIds = new Set(
+    (assignmentsResult.data || [])
+      .map(assignment => assignment.booking_id)
+      .filter((id): id is string => Boolean(id))
+  )
+  const activeBookings = (bookingsResult.data || []).filter(booking => {
+    if (isVehicleHoldActive(booking, now)) return true
+    if (booking.booking_id && assignedBookingIds.has(booking.booking_id)) return true
+    if (booking.id && assignedBookingIds.has(booking.id)) return true
+    return false
+  })
+
   return {
-    activeBookings: bookingsResult.data || [],
+    activeBookings,
     assignments: assignmentsResult.data || [],
     activeCars: carsResult.data || [],
   }

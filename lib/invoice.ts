@@ -238,7 +238,7 @@ export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<jsPD
   // Data rows with alternating background
   const rows = [
     { label: 'Taxi Service Charges', amount: invoiceData.totalAmount },
-    { label: 'Advance Payment (Online)', amount: invoiceData.advanceAmount },
+    { label: 'Paid Online', amount: invoiceData.advanceAmount },
     { label: 'Remaining Balance', amount: invoiceData.remainingAmount },
   ]
 
@@ -296,7 +296,9 @@ export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<jsPD
   doc.setTextColor(60, 60, 60)
   const paymentInfo = invoiceData.paymentMethod.includes('Full')
     ? `Full payment of Rs. ${invoiceData.totalAmount.toFixed(2)} made online.`
-    : `Advance: Rs. ${invoiceData.advanceAmount.toFixed(2)} (online) | Remaining: Rs. ${invoiceData.remainingAmount.toFixed(2)} (due at pickup)`
+    : invoiceData.remainingAmount <= 0
+      ? `Paid in full: Rs. ${invoiceData.advanceAmount.toFixed(2)} online, Rs. ${(invoiceData.totalAmount - invoiceData.advanceAmount).toFixed(2)} in cash.`
+      : `Paid: Rs. ${invoiceData.advanceAmount.toFixed(2)} (online) | Remaining: Rs. ${invoiceData.remainingAmount.toFixed(2)} (due in cash)`
 
   doc.text(paymentInfo, margin, yPosition + 5, { maxWidth: contentWidth })
 

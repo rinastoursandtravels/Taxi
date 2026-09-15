@@ -4,7 +4,19 @@ import { requireAdminRequest } from '@/lib/admin-auth'
 
 export const dynamic = 'force-dynamic'
 
-const PUBLIC_READ_KEYS = new Set(['pending_booking_timeout_hours'])
+// Keys the customer-facing pages may read without admin auth. The free booking
+// switches are here because the checkout screen has to know whether to offer
+// the "Book Now, Pay Later" option — the server re-checks them on submit, so
+// exposing them reveals nothing an attacker could exploit.
+const PUBLIC_READ_KEYS = new Set([
+  'pending_booking_timeout_hours',
+  'free_booking_enabled_taxi',
+  'free_booking_enabled_tour',
+  // Hold-window lengths, so the payment page can tell a customer up front how
+  // long they have to pay before their free booking's vehicle hold lapses.
+  'free_booking_hold_hours_taxi',
+  'free_booking_hold_hours_tour',
+])
 
 export async function GET(request: NextRequest) {
   try {

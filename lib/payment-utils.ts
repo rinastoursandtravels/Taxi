@@ -4,9 +4,15 @@
  */
 
 /**
- * Calculate online and cash payment amounts based on payment type
+ * Calculate online and cash payment amounts based on payment type.
+ *
+ * LEGACY. The 30% advance was removed — new bookings are either paid in full
+ * online or submitted unpaid and settled in cash. The 'partial' branch is kept
+ * only so historic 30% rows can still be reasoned about; do not use it to
+ * create new payments.
+ *
  * @param totalAmount - Total booking amount
- * @param paymentType - 'partial' (30% online) or 'full' (100% online)
+ * @param paymentType - 'partial' (legacy 30% online) or 'full' (100% online)
  * @returns Object with amountOnlinePaid and amountCashPaid
  */
 export function calculatePaymentAmounts(

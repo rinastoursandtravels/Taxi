@@ -1739,10 +1739,10 @@ export default function HomeClient() {
                       <line x1="193" y1="170" x2="369" y2="170" stroke="rgba(255,218,0,0.1)" strokeWidth="0.6"/>
                       <text x="193" y="185" fontSize="9" fill="rgba(255,255,255,0.38)" fontFamily="monospace">TOTAL</text>
                       <text x="369" y="188" textAnchor="end" fontSize="16" fontWeight="bold" fill="#ffda00" fontFamily="monospace">₹2,800</text>
-                      {/* Pay 30% */}
+                      {/* Book now, pay later */}
                       <rect x="183" y="218" width="194" height="38" rx="7" fill="rgba(255,218,0,0.1)" stroke="rgba(255,218,0,0.45)" strokeWidth="1"/>
-                      <text x="280" y="233" textAnchor="middle" fontSize="9.5" fontWeight="bold" fill="rgba(255,218,0,0.88)" fontFamily="monospace">PAY 30% · ₹840</text>
-                      <text x="280" y="248" textAnchor="middle" fontSize="7.5" fill="rgba(255,218,0,0.4)" fontFamily="monospace">₹1,960 cash to driver</text>
+                      <text x="280" y="233" textAnchor="middle" fontSize="9.5" fontWeight="bold" fill="rgba(255,218,0,0.88)" fontFamily="monospace">BOOK NOW · PAY LATER</text>
+                      <text x="280" y="248" textAnchor="middle" fontSize="7.5" fill="rgba(255,218,0,0.4)" fontFamily="monospace">₹2,800 cash · no advance</text>
                       {/* Pay full */}
                       <rect x="183" y="265" width="194" height="38" rx="7" fill="#ffda00"/>
                       <text x="280" y="280" textAnchor="middle" fontSize="9.5" fontWeight="bold" fill="#1a1512" fontFamily="monospace">PAY FULL · ₹2,800</text>
