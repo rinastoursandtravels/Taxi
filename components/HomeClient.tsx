@@ -8,8 +8,8 @@ import Footer from '@/components/Footer'
 import {
   Users, Star, Clock, ArrowRight, Car, MapPin,
   Shield, ChevronRight, CheckCircle, Zap, ChevronDown,
-  AlertTriangle, X,
 } from 'lucide-react'
+import SiteBanners from '@/components/SiteBanners'
 import { fetchAllTours, fetchAllTourRatingStats, type RatingStats } from '@/lib/db'
 import type { TourPackage } from '@/lib/db'
 import gsap from 'gsap'
@@ -68,7 +68,6 @@ export default function HomeClient() {
   const [expandedTourId, setExpandedTourId] = useState<string | null>(null)
   const [cardImgIdx, setCardImgIdx] = useState<Record<string, number>>({})
   const [heroIndex, setHeroIndex] = useState(0)
-  const [showILPNotice, setShowILPNotice] = useState<boolean | null>(null)
   const touchStartX = useRef<number>(0)
   const mainRef = useRef<HTMLDivElement>(null)
   const overlayPathsRef = useRef<SVGPathElement[]>([])
@@ -106,15 +105,6 @@ export default function HomeClient() {
       window.removeEventListener('pageshow', handlePageShow)
     }
   }, [])
-
-  useEffect(() => {
-    setShowILPNotice(!sessionStorage.getItem('ilp-notice-dismissed'))
-  }, [])
-
-  const dismissILPNotice = () => {
-    setShowILPNotice(false)
-    sessionStorage.setItem('ilp-notice-dismissed', '1')
-  }
 
   useEffect(() => {
     const id = setInterval(() => setHeroIndex(i => (i + 1) % HERO_IMAGES.length), 12000)
@@ -1389,35 +1379,8 @@ export default function HomeClient() {
     {/* Header outside mainRef — truly viewport-fixed at z-50, above the SVG wipe overlay (z-49) */}
     <Header />
 
-    {/* ── ILP Notice Banner ── */}
-    {showILPNotice === true && (
-      <div
-        className="fixed bottom-0 left-0 right-0 z-40"
-        style={{ background: '#ffda00', boxShadow: '0 -4px 32px rgba(255,218,0,0.28)' }}
-      >
-        <div className="container mx-auto px-4 py-3 flex items-start gap-3">
-          {/* Icon */}
-          <span className="mt-0.5 shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-black/10">
-            <AlertTriangle size={15} strokeWidth={2.5} className="text-primary-950" />
-          </span>
-
-          {/* Text */}
-          <p className="flex-1 text-xs md:text-sm leading-relaxed text-primary-950 min-w-0 font-medium">
-            <span className="font-black tracking-widest uppercase mr-2 text-[10px] md:text-xs">ILP Notice</span>
-            Inner Line Permit (ILP) is mandatory for all non-APST visitors entering Arunachal Pradesh. Please ensure you carry a valid ILP during your visit.
-          </p>
-
-          {/* Dismiss */}
-          <button
-            onClick={dismissILPNotice}
-            aria-label="Dismiss ILP notice"
-            className="shrink-0 mt-0.5 p-1 rounded-md text-primary-950/60 hover:text-primary-950 hover:bg-black/10 transition-colors duration-150"
-          >
-            <X size={15} strokeWidth={2.5} />
-          </button>
-        </div>
-      </div>
-    )}
+    {/* ── Admin-managed notice banners (ILP notice by default) ── */}
+    <SiteBanners />
 
     <div ref={mainRef} className="flex flex-col bg-primary-950" style={{ willChange: 'transform' }}>
 

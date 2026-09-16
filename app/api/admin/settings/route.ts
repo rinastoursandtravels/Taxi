@@ -16,6 +16,8 @@ const PUBLIC_READ_KEYS = new Set([
   // long they have to pay before their free booking's vehicle hold lapses.
   'free_booking_hold_hours_taxi',
   'free_booking_hold_hours_tour',
+  // Notice banners are, by definition, content shown to every visitor.
+  'site_banners',
 ])
 
 export async function GET(request: NextRequest) {

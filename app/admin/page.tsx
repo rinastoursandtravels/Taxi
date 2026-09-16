@@ -8,6 +8,19 @@ import { useAdmin } from '@/context/AdminContext'
 import { ProtectedAdminPage } from '@/components/ProtectedAdminPage'
 import { LogOut, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Booking } from '@/lib/db'
+import { SiteBannerRow } from '@/components/SiteBanners'
+import {
+  BANNER_LIMITS,
+  BANNER_THEMES,
+  BANNER_THEME_KEYS,
+  MAX_BANNERS,
+  SITE_BANNERS_KEY,
+  createEmptyBanner,
+  parseSiteBanners,
+  sanitizeBannerUrl,
+  serializeSiteBanners,
+  type SiteBanner,
+} from '@/lib/site-banners'
 
 type AdminApiResponse = {
   success?: boolean
@@ -550,6 +563,16 @@ export default function AdminDashboard() {
   const [freeMaxAdvance, setFreeMaxAdvance] = useState(90)
   const [savingFreeSetting, setSavingFreeSetting] = useState<string | null>(null)
 
+  // Homepage notice banners. `siteBannersSaved` is the last version known to be
+  // in the database, so the editor can tell whether there are unsaved edits.
+  const [siteBanners, setSiteBanners] = useState<SiteBanner[]>([])
+  const [siteBannersSaved, setSiteBannersSaved] = useState<string>('')
+  const [savingSiteBanners, setSavingSiteBanners] = useState(false)
+  // Three expanded banner editors push the rest of Settings a long way down,
+  // so each banner starts folded to just its title and a one-line summary.
+  // Per-session only — always starts folded on a fresh visit.
+  const [expandedBannerIds, setExpandedBannerIds] = useState<string[]>([])
+
   useEffect(() => {
     document.documentElement.style.overflowY = 'auto'
     document.body.style.overflowY = 'auto'
@@ -575,13 +598,20 @@ export default function AdminDashboard() {
   // ── Clear cache and logout on admin page load ─────────────────────────────
   useEffect(() => {
     // Clear all browser storage (cache, session, local data)
-    // Preserve admin UI preferences and auth token before clearing
-    const adminDarkMode = localStorage.getItem('adminDarkMode')
-    const adminToken = localStorage.getItem('adminToken')
+    // Preserve admin UI preferences and auth token before clearing. Every
+    // localStorage key the panel wants to survive a refresh MUST be listed
+    // here — anything missing is wiped on the next page load.
+    const PRESERVED_KEYS = [
+      'adminDarkMode',
+      'adminToken',
+      'adminTabBarCollapsed',
+    ]
+    const preserved = PRESERVED_KEYS.map((key) => [key, localStorage.getItem(key)] as const)
     localStorage.clear()
     sessionStorage.clear()
-    if (adminDarkMode !== null) localStorage.setItem('adminDarkMode', adminDarkMode)
-    if (adminToken !== null) localStorage.setItem('adminToken', adminToken)
+    for (const [key, value] of preserved) {
+      if (value !== null) localStorage.setItem(key, value)
+    }
     
     // Clear IndexedDB
     if (window.indexedDB) {
@@ -643,9 +673,106 @@ export default function AdminDashboard() {
           if (s.key === 'free_booking_max_open_per_user') setFreeMaxOpen(Number(s.value) || 0)
           if (s.key === 'free_booking_max_advance_days') setFreeMaxAdvance(Number(s.value) || 0)
         }
+
+        // Handled outside the loop because an ABSENT row is meaningful here:
+        // it means no banner has ever been saved, so the built-in ILP notice
+        // is what the site is currently showing.
+        const bannerRow = data.settings.find((s: { key: string }) => s.key === SITE_BANNERS_KEY)
+        const loadedBanners = parseSiteBanners(bannerRow ? bannerRow.value : null)
+        setSiteBanners(loadedBanners)
+        setSiteBannersSaved(serializeSiteBanners(loadedBanners))
       }
     } catch {
       // keep defaults
+    }
+  }
+
+  const updateSiteBanner = (id: string, patch: Partial<SiteBanner>) => {
+    setSiteBanners((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
+  }
+
+  const removeSiteBanner = (id: string) => {
+    setSiteBanners((prev) => prev.filter((b) => b.id !== id))
+    setExpandedBannerIds((prev) => prev.filter((x) => x !== id))
+  }
+
+  const toggleBannerExpanded = (id: string) => {
+    setExpandedBannerIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  const addSiteBanner = () => {
+    if (siteBanners.length >= MAX_BANNERS) return
+    const banner = createEmptyBanner()
+    setSiteBanners((prev) => (prev.length >= MAX_BANNERS ? prev : [...prev, banner]))
+    // Open it straight away — a collapsed blank banner is a dead end.
+    setExpandedBannerIds((prev) => [...prev, banner.id])
+  }
+
+  const moveSiteBanner = (id: string, direction: -1 | 1) => {
+    setSiteBanners((prev) => {
+      const index = prev.findIndex((b) => b.id === id)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= prev.length) return prev
+      const next = [...prev]
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
+
+  // A banner with no message never survives serialization, so comparing only
+  // the serialized forms would leave a half-typed new banner looking "saved".
+  // Treating it as unsaved keeps the Save button live, and validation then says
+  // exactly what is missing instead of the button sitting greyed out.
+  const siteBannersDirty =
+    serializeSiteBanners(siteBanners) !== siteBannersSaved ||
+    siteBanners.some((banner) => !banner.message.trim())
+
+  const handleSaveSiteBanners = async () => {
+    for (const [index, banner] of siteBanners.entries()) {
+      const position = `Banner ${index + 1}`
+      // A collapsed banner would hide whatever is wrong, so open the one
+      // named in the message.
+      const reject = (message: string) => {
+        setExpandedBannerIds((prev) => (prev.includes(banner.id) ? prev : [...prev, banner.id]))
+        toast.error(message)
+      }
+      if (!banner.message.trim()) {
+        reject(`${position} needs a message.`)
+        return
+      }
+      if (banner.linkUrl.trim() && !sanitizeBannerUrl(banner.linkUrl)) {
+        reject(`${position}: link must start with https://, / or mailto:`)
+        return
+      }
+      if (banner.linkUrl.trim() && !banner.linkLabel.trim()) {
+        reject(`${position} needs link text to go with its link.`)
+        return
+      }
+      if (banner.linkLabel.trim() && !banner.linkUrl.trim()) {
+        reject(`${position} needs a link address to go with its link text.`)
+        return
+      }
+    }
+
+    const payload = serializeSiteBanners(siteBanners)
+    setSavingSiteBanners(true)
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PATCH',
+        headers: adminHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ key: SITE_BANNERS_KEY, value: payload }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+      // Re-read our own payload so the editor shows exactly what the site will,
+      // including any trimming or link-dropping the normaliser applied.
+      setSiteBanners(parseSiteBanners(payload))
+      setSiteBannersSaved(payload)
+      toast.success(siteBanners.length ? 'Banners saved.' : 'All banners removed.')
+    } catch {
+      toast.error('Failed to save banners.')
+    } finally {
+      setSavingSiteBanners(false)
     }
   }
 
@@ -5480,6 +5607,228 @@ export default function AdminDashboard() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+
+        <div className="space-y-2 md:space-y-3 pt-4 md:pt-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Homepage Banners</span>
+              <span className="text-[11px] text-gray-400 truncate">
+                {siteBanners.length === 0
+                  ? 'none'
+                  : `${siteBanners.length} · ${siteBanners.filter((b) => b.enabled).length} showing`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {siteBannersDirty && (
+                <span className={`text-[11px] font-semibold rounded-md px-2 py-1 border ${darkMode ? 'text-amber-300 bg-amber-950/30 border-amber-700/50' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>
+                  Unsaved changes
+                </span>
+              )}
+              <button
+                onClick={() => void handleSaveSiteBanners()}
+                disabled={savingSiteBanners || !siteBannersDirty}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-50"
+              >
+                {savingSiteBanners ? 'Saving...' : 'Save Banners'}
+              </button>
+            </div>
+          </div>
+
+          <div className="px-3 md:px-4 py-3 md:py-4 rounded-lg border border-gray-200 space-y-3">
+            <p className="text-xs md:text-sm text-gray-500">
+              Notices pinned to the bottom of the homepage. Visitors can close a dismissible banner and it
+              stays closed until they come back in a new browser session. Editing a banner&apos;s wording
+              shows it again to everyone. Up to {MAX_BANNERS} banners.
+            </p>
+
+            {siteBanners.length === 0 && (
+              <p className="text-xs md:text-sm text-gray-400 italic py-2">
+                No banners. Visitors see no notice on the homepage.
+              </p>
+            )}
+
+            {siteBanners.map((banner, index) => {
+              const bannerExpanded = expandedBannerIds.includes(banner.id)
+              const bannerTheme = BANNER_THEMES[banner.theme] ?? BANNER_THEMES.warning
+              return (
+              <div key={banner.id} className={`rounded-lg border p-3 space-y-3 ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50/60'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => toggleBannerExpanded(banner.id)}
+                    aria-expanded={bannerExpanded}
+                    className="flex items-center gap-2 min-w-0 text-left group"
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`shrink-0 text-gray-400 group-hover:text-gray-600 transition-transform duration-200 ${bannerExpanded ? '' : '-rotate-90'}`}
+                    />
+                    <span className="text-xs font-bold text-gray-700 shrink-0">Banner {index + 1}</span>
+                    <span className={`text-[11px] font-semibold rounded px-1.5 py-0.5 shrink-0 ${banner.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
+                      {banner.enabled ? 'Showing' : 'Hidden'}
+                    </span>
+                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => moveSiteBanner(banner.id, -1)}
+                      disabled={index === 0}
+                      aria-label={`Move banner ${index + 1} up`}
+                      className="p-1.5 rounded-md text-gray-500 hover:bg-gray-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                    >
+                      <ChevronUp size={14} />
+                    </button>
+                    <button
+                      onClick={() => moveSiteBanner(banner.id, 1)}
+                      disabled={index === siteBanners.length - 1}
+                      aria-label={`Move banner ${index + 1} down`}
+                      className="p-1.5 rounded-md text-gray-500 hover:bg-gray-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                    <button
+                      onClick={() => removeSiteBanner(banner.id)}
+                      aria-label={`Delete banner ${index + 1}`}
+                      className="p-1.5 rounded-md text-red-500 hover:bg-red-50"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                    <button
+                      onClick={() => updateSiteBanner(banner.id, { enabled: !banner.enabled })}
+                      aria-label={`${banner.enabled ? 'Hide' : 'Show'} banner ${index + 1}`}
+                      className={`relative inline-flex items-center w-11 h-6 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-secondary-500 focus:ring-offset-2 ml-1 ${banner.enabled ? 'bg-green-500' : 'bg-gray-300'}`}
+                    >
+                      <span className={`inline-block w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-300 ${banner.enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Collapsed: a colour dot and the wording, so a folded banner
+                    is still identifiable without opening it. */}
+                {!bannerExpanded && (
+                  <button
+                    onClick={() => toggleBannerExpanded(banner.id)}
+                    className="w-full flex items-center gap-2 min-w-0 text-left"
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10"
+                      style={{ background: bannerTheme.bg }}
+                    />
+                    <span className="text-[11px] text-gray-500 truncate">
+                      {banner.label ? `${banner.label} — ` : ''}
+                      {banner.message.trim() || 'Empty — open to add a message.'}
+                    </span>
+                  </button>
+                )}
+
+                {bannerExpanded && (
+                <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Tag (optional)</label>
+                    <input
+                      type="text"
+                      value={banner.label}
+                      maxLength={BANNER_LIMITS.label}
+                      placeholder="e.g. ILP Notice"
+                      onChange={(e) => updateSiteBanner(banner.id, { label: e.target.value })}
+                      className="input-field text-sm w-full"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">Short bold text before the message.</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Colour</label>
+                    <select
+                      value={banner.theme}
+                      onChange={(e) => updateSiteBanner(banner.id, { theme: e.target.value as SiteBanner['theme'] })}
+                      className="input-field text-sm w-full"
+                    >
+                      {BANNER_THEME_KEYS.map((key) => (
+                        <option key={key} value={key}>{BANNER_THEMES[key].label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Message</label>
+                  <textarea
+                    value={banner.message}
+                    maxLength={BANNER_LIMITS.message}
+                    rows={3}
+                    placeholder="What should visitors know?"
+                    onChange={(e) => updateSiteBanner(banner.id, { message: e.target.value })}
+                    className="input-field text-sm w-full resize-y"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {banner.message.length}/{BANNER_LIMITS.message} characters
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Link text (optional)</label>
+                    <input
+                      type="text"
+                      value={banner.linkLabel}
+                      maxLength={BANNER_LIMITS.linkLabel}
+                      placeholder="e.g. Apply here"
+                      onChange={(e) => updateSiteBanner(banner.id, { linkLabel: e.target.value })}
+                      className="input-field text-sm w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Link address</label>
+                    <input
+                      type="text"
+                      value={banner.linkUrl}
+                      maxLength={BANNER_LIMITS.linkUrl}
+                      placeholder="https://..."
+                      onChange={(e) => updateSiteBanner(banner.id, { linkUrl: e.target.value })}
+                      className="input-field text-sm w-full"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">Must start with https:// or / for a page on this site.</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-gray-600">Visitors can close it</p>
+                    <p className="text-[11px] text-gray-400">
+                      {banner.dismissible ? 'Shows an X button.' : 'Stays on screen — use only for critical notices.'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => updateSiteBanner(banner.id, { dismissible: !banner.dismissible })}
+                    aria-label={`Toggle dismissible for banner ${index + 1}`}
+                    className={`relative inline-flex items-center w-11 h-6 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-secondary-500 focus:ring-offset-2 shrink-0 ${banner.dismissible ? 'bg-green-500' : 'bg-gray-300'}`}
+                  >
+                    <span className={`inline-block w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-300 ${banner.dismissible ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-widest mb-1.5">Preview</p>
+                  <div className="rounded-lg overflow-hidden border border-gray-200">
+                    <SiteBannerRow
+                      banner={{ ...banner, message: banner.message.trim() || 'Your message will appear here.' }}
+                      onDismiss={banner.dismissible ? () => {} : undefined}
+                    />
+                  </div>
+                </div>
+                </>
+                )}
+              </div>
+              )
+            })}
+
+            <button
+              onClick={addSiteBanner}
+              disabled={siteBanners.length >= MAX_BANNERS}
+              className="w-full py-2 text-xs font-semibold rounded-lg border-2 border-dashed border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:border-gray-300"
+            >
+              {siteBanners.length >= MAX_BANNERS ? `Maximum ${MAX_BANNERS} banners` : '+ Add Banner'}
+            </button>
           </div>
         </div>
 
